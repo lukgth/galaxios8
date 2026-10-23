@@ -13,7 +13,9 @@
 # stops and says so; it never retries a write.
 set -euo pipefail
 
-SERIAL=ce081718edd2030d02
+# Serial of the SM-G950N test phone. Set ANDROID_SERIAL to use another phone
+# (the SM-G950F here is ce03171365ba20780c).
+SERIAL=${ANDROID_SERIAL:-ce081718edd2030d02}
 img=${1:?BOOT image}
 name=${2:?name for the logs, e.g. k2b}
 timeout=${3:-600}
