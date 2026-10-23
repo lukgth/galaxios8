@@ -1053,34 +1053,40 @@ S8Mali::userClose(void)
 int
 S8Mali::userGetParam(uint32_t param, uint64_t *value)
 {
+	static unsigned logged;
 	uint32_t id = rd(GPU_ID);
+
 	switch (param) {
 	case 0:						/* GPU_PROD_ID */
 		/* Linux panfrost reports the model id (0x6000 for G71), not the
 		 * whole product word (this chip: 0x60a0). */
 		*value = (id >> 16) & 0xff00;
-		return 0;
+		break;
 	case 1:						/* JS_FEATURES13 */
 	case 2:						/* JS_FEATURES14 */
 	case 3:						/* JS_FEATURES15 */
 		*value = 0;
-		return 0;
+		break;
 	case 4:						/* NR_CORE_GROUPS */
 		*value = 1;
-		return 0;
+		break;
 	case 5:						/* THREAD_TLS_ALLOC */
 	case 6:						/* AFBC_FEATURES */
 		*value = 0;
-		return 0;
+		break;
 	case 7:						/* SYSTEM_TIMESTAMP */
 		*value = mach_absolute_time();
-		return 0;
+		break;
 	case 8:						/* SYSTEM_TIMESTAMP_FREQUENCY */
 		*value = 0;
-		return 0;
+		break;
 	default:
 		return -22;
 	}
+	if (logged++ < 16) {
+		IOLog("S8 GPU: GET_PARAM %u = 0x%llx\n", param, *value);
+	}
+	return 0;
 }
 
 IOReturn
@@ -1094,6 +1100,11 @@ S8Mali::userCreateBo(uint32_t size, uint32_t flags, uint32_t *handle, uint64_t *
 	IOReturn ret = kIOReturnNoMemory;
 	if (bo != NULL && (!fPowered || mapBo(bo))) {
 		*offset = bo->va;
+		static unsigned logged;
+		if (logged++ < 16) {
+			IOLog("S8 GPU: user BO %u size %u flags %u VA 0x%llx\n",
+			    *handle, size, flags, bo->va);
+		}
 		ret = kIOReturnSuccess;
 	} else if (bo != NULL) {
 		freeBo(bo);
