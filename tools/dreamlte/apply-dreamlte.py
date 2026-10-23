@@ -2606,3 +2606,33 @@ edit('iokit/Kernel/arm/SweetFramebuffer.cpp', [
      '\t\tIOLog("S8 DPP: no frame done within 40 ms of a flip (%u)\\n", s8_dpp_forced);\n'
      '\t}\n', 1),
 ])
+
+# ---- Mali-G71 (Bifrost) kernel driver, milestone 2a ----
+# Source kept in xnu/dreamlte/S8Mali.cpp; this adds it to the tree, to the
+# arm64 IOKit file list and to the kernel config tables (IOResources match,
+# like SweetBattery: the S8 has no Mali device node).
+repo = Path(__file__).resolve().parents[2]
+src = (repo / 'xnu/dreamlte/S8Mali.cpp').read_text()
+dst = tree / 'iokit/Kernel/arm/S8Mali.cpp'
+if dst.exists():
+    raise SystemExit('iokit/Kernel/arm/S8Mali.cpp already exists')
+dst.write_text(src)
+print('added iokit/Kernel/arm/S8Mali.cpp')
+
+edit('iokit/conf/files.arm64', [(
+    'iokit/Kernel/arm/SweetBattery.cpp                                optional iokitcpp\n',
+    'iokit/Kernel/arm/SweetBattery.cpp                                optional iokitcpp\n'
+    'iokit/Kernel/arm/S8Mali.cpp                                      optional iokitcpp\n', 1)])
+
+edit('iokit/KernelConfigTables.cpp', [(
+    "    \"     'IOMatchCategory' = SweetBattery;\"\n"
+    "    \"   },\"\n"
+    "#endif\n",
+    "    \"     'IOMatchCategory' = SweetBattery;\"\n"
+    "    \"   },\"\n"
+    "#endif\n"
+    "    \"   {\"\n"
+    "    \"     'IOClass'         = S8Mali;\"\n"
+    "    \"     'IOProviderClass' = IOResources;\"\n"
+    "    \"     'IOMatchCategory' = S8Mali;\"\n"
+    "    \"   },\"\n", 1)])
