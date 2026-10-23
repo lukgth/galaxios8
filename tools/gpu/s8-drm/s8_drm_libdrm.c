@@ -86,6 +86,28 @@ drmFreeVersion(drmVersionPtr v)
 	free(v);
 }
 
+/* The S8Mali user client has no dma-buf export or import yet. */
+int
+drmPrimeHandleToFD(int fd, unsigned int handle, unsigned int flags, int *prime_fd)
+{
+	(void)fd;
+	(void)handle;
+	(void)flags;
+	(void)prime_fd;
+	errno = ENOSYS;
+	return -1;
+}
+
+int
+drmPrimeFDToHandle(int fd, int prime_fd, unsigned int *handle)
+{
+	(void)fd;
+	(void)prime_fd;
+	(void)handle;
+	errno = ENOSYS;
+	return -1;
+}
+
 void *
 drmMap(int fd, unsigned long offset, unsigned long size)
 {

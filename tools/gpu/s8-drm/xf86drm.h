@@ -32,6 +32,9 @@ void drmFreeVersion(drmVersionPtr version);
 int drmOpen(const char *name, const char *busid);
 int drmClose(int fd);
 
+int drmPrimeHandleToFD(int fd, unsigned int handle, unsigned int flags, int *prime_fd);
+int drmPrimeFDToHandle(int fd, int prime_fd, unsigned int *handle);
+
 void *drmMap(int fd, unsigned long offset, unsigned long size);
 int drmUnmap(void *address, unsigned long size);
 
