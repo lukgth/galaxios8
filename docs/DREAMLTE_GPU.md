@@ -48,7 +48,49 @@ r0p0 with 20 shader cores, all blocks came ready, and job 1 finished with
 reported a failure only because it read the wrong status register; that is
 fixed. Job 2 and the unmapped-page check run next.
 
-The driver is not yet a user client. Mesa cannot talk to it.
+### Milestone 2b, run on the phone on 2026-10-24 (log `logs/sweetlog-gpu6.txt`)
+
+The driver makes buffer objects and runs a job that writes through one of
+them. It also runs a job that reads an address with no mapping and checks
+that the MMU reports the fault and that the job does not complete:
+
+```
+S8 GPU: BO job done RAWSTAT 0x1 header status 0x1 B[0x10] 0x600dcafe
+S8 GPU: unmapped job did not complete RAWSTAT 0x0 MMU int 0x1 fault 0x7c0003c3 at 0x12010
+S8 GPU: milestone 2b (1/2) passed: BOs and a fault
+```
+
+### The user client
+
+`S8MaliUserClient` speaks the panfrost call numbers, so Mesa needs no change
+in the call path:
+
+| Selector | Call | What it does |
+|---|---|---|
+| 0x00 | `GET_PARAM` | ID, revision, core count, features |
+| 0x01 | `CREATE_BO` | makes a buffer object, returns a handle |
+| 0x02 | `MMAP_BO` | maps it into the client, returns an address |
+| 0x03 | `GET_BO_OFFSET` | GPU virtual address of a buffer |
+| 0x04 | `SUBMIT` | runs a job chain on a slot |
+| 0x05 | `WAIT_BO` | waits for a job that writes the buffer |
+| 0x08 | `MADVISE` | accepts the call, does nothing yet |
+| 0x80 | `S8_LOG` | copies a string into the kernel log, for tests |
+
+The kernel runs the same calls itself with `s8gpu=3` and checks the result:
+
+```
+S8 GPU: user BO 1 size 8192 flags 0 VA 0x13000
+S8 GPU: submit ok 1, job 0x13000 slot 1
+S8 GPU: UAPI submit 0x0 -> B[0x40] 0x5a5a1234 retained 1
+S8 GPU: UAPI test passed
+```
+
+Client memory is mapped write-combined. The driver cleans and invalidates
+the caches before and after every submit. A fault resets the GPU and the
+slot, and later calls still work.
+
+The driver is a user client now. Mesa can talk to it. What is missing is a
+`pan_kmod` backend for Darwin, which is in progress.
 
 ## Next
 
