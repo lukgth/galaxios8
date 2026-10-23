@@ -38,7 +38,7 @@ jobs:
       - name: Deps
         run: |
           brew install meson ninja bison flex pkg-config || true
-          python3 -m pip install --user --upgrade mako pyyaml packaging
+          python3 -m pip install --user --break-system-packages --upgrade mako pyyaml packaging
           echo "PYTHONPATH=$(python3 -m site --user-site)" >> "$GITHUB_ENV"
           python3 -c 'import mako; print("mako", mako.__version__)'
           meson --version
