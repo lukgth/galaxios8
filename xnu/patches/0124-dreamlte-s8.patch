@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..ab7755a
+index 0000000..0e3d198
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,491 @@
+@@ -0,0 +1,807 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -871,6 +871,7 @@ index 0000000..ab7755a
 +#include <IOKit/IOBufferMemoryDescriptor.h>
 +#include <IOKit/IOLib.h>
 +#include <IOKit/IOTypes.h>
++#include <libkern/libkern.h>
 +#include <pexpert/pexpert.h>
 +#include <pexpert/arm64/board_config.h>
 +
@@ -975,6 +976,23 @@ index 0000000..ab7755a
 +#define S8_GPU_WITNESS		0x6000	/* never mapped: must stay untouched */
 +#define S8_GPU_VA_WINDOW	0x10000000ULL	/* GPU VA of the block's data */
 +
++/* GPU address space: 4 GiB, as panfrost gives each client. Tables: one L0,
++ * one L1, four L2 (4 GiB / 1 GiB), L3 pages handed out in 64 KiB chunks. */
++#define S8_GPU_VA_BASE		0x00010000ULL
++#define S8_GPU_VA_END		0x100000000ULL
++#define S8_GPU_L3_CHUNKS	128
++#define S8_GPU_L3_PER_CHUNK	16
++#define S8_GPU_MAX_BOS		64
++
++struct S8GpuBo {
++	uint32_t handle;
++	uint32_t flags;
++	uint64_t va;
++	uint64_t size;
++	IOBufferMemoryDescriptor *mem;
++	void *vaCpu;
++};
++
 +class S8Mali : public IOService {
 +	OSDeclareDefaultStructors(S8Mali);
 +public:
@@ -1004,8 +1022,29 @@ index 0000000..ab7755a
 +	bool asUpdate(uint64_t transtab);
 +	bool buildTables(void);
 +	void writeValueJob(uint32_t off, uint64_t va, uint32_t value);
-+	bool runJob(uint64_t jc, uint32_t *rawstat, uint32_t *status);
++	bool runJob(uint64_t jc, uint32_t *headerWord, uint32_t *rawstat);
 +	bool selfTest(void);
++
++	/* Buffer objects and the 4 GiB GPU address space */
++	IOBufferMemoryDescriptor *fTables;
++	uint64_t fTablesPhys;
++	uint64_t *fL2[4];
++	IOBufferMemoryDescriptor *fL3Chunk[S8_GPU_L3_CHUNKS];
++	uint64_t fL3Phys[S8_GPU_L3_CHUNKS];
++	unsigned fL3Count;
++	uint64_t fVaNext;
++	S8GpuBo *fBos[S8_GPU_MAX_BOS];
++	uint32_t fBoCount;
++
++	bool tablesInit(void);
++	uint64_t *l3For(uint64_t va);
++	bool mapPage(uint64_t va, uint64_t pa, bool noexec);
++	bool flushPageTables(void);
++	S8GpuBo *allocBo(uint32_t size, uint32_t flags, uint32_t *handle);
++	S8GpuBo *findBo(uint32_t handle);
++	bool mapBo(S8GpuBo *bo);
++	void freeBo(S8GpuBo *bo);
++	bool boTest(void);
 +};
 +
 +OSDefineMetaClassAndStructors(S8Mali, IOService);
@@ -1182,7 +1221,7 @@ index 0000000..ab7755a
 +/* The job header's first word holds the exception status (1 = DONE), as the
 + * loader logged in c30b; JS_STATUS is 0 again once the job left the slot. */
 +bool
-+S8Mali::runJob(uint64_t jc, uint32_t *rawstat, uint32_t *status)
++S8Mali::runJob(uint64_t jc, uint32_t *headerWord, uint32_t *rawstat)
 +{
 +	flush_dcache((vm_offset_t)fBlockVa, S8_GPU_BLOCK_SIZE, 0);
 +	wr(JOB_INT_CLEAR, 0xffffffffu);
@@ -1202,9 +1241,7 @@ index 0000000..ab7755a
 +		IODelay(1);
 +	}
 +	*rawstat = rd(JOB_INT_RAWSTAT);
-+	*status = *(volatile uint32_t *)((uint8_t *)fBlockVa +
-+	    (uint32_t)(jc - fBlockPhys));
-+	flush_dcache((vm_offset_t)fBlockVa, S8_GPU_BLOCK_SIZE, 0);
++	flush_dcache((vm_offset_t)headerWord, 0x40, 0);
 +	return done;
 +}
 +
@@ -1239,7 +1276,8 @@ index 0000000..ab7755a
 +	writeValueJob(S8_GPU_JOB + 0x40, S8_GPU_VA_WINDOW + 0x20, 0xc0ffee22u);
 +
 +	uint32_t raw = 0, status = 0;
-+	bool done = runJob(jobPa, &raw, &status);
++	bool done = runJob(jobPa, (uint32_t *)((uint8_t *)fBlockVa + S8_GPU_JOB), &raw);
++	status = *(uint32_t *)((uint8_t *)fBlockVa + S8_GPU_JOB);
 +	IOLog("S8 GPU: job 1 %s RAWSTAT 0x%x header status 0x%x data[4] 0x%x\n",
 +	    done ? "done" : "TIMEOUT", raw, status, data[4]);
 +	if (!done || status != 1 || data[4] != 0xc0ffee11u) {
@@ -1248,7 +1286,8 @@ index 0000000..ab7755a
 +	}
 +	data[8] = 0;
 +	flush_dcache((vm_offset_t)fBlockVa, S8_GPU_BLOCK_SIZE, 0);
-+	done = runJob(jobPa + 0x40, &raw, &status);
++	done = runJob(jobPa + 0x40, (uint32_t *)((uint8_t *)fBlockVa + S8_GPU_JOB + 0x40), &raw);
++	status = *(uint32_t *)((uint8_t *)fBlockVa + S8_GPU_JOB + 0x40);
 +	IOLog("S8 GPU: job 2 %s RAWSTAT 0x%x header status 0x%x data[8] 0x%x witness 0x%x\n",
 +	    done ? "done" : "TIMEOUT", raw, status, data[8], *witness);
 +	if (!done || status != 1 || data[8] != 0xc0ffee22u || *witness != 0xdead0000u) {
@@ -1257,6 +1296,274 @@ index 0000000..ab7755a
 +		return false;
 +	}
 +	return true;
++}
++
++/* ---- buffer objects and the 4 GiB GPU address space (milestone 2b, 1/2) ---- */
++
++bool
++S8Mali::tablesInit(void)
++{
++	fTables = IOBufferMemoryDescriptor::withOptions(
++	    kIOMemoryPhysicallyContiguous | kIODirectionOutIn | kIOMemoryMapperNone,
++	    0x10000, 0x10000);
++	if (fTables == NULL) {
++		return false;
++	}
++	fTablesPhys = fTables->getPhysicalAddress();
++	uint8_t *base = (uint8_t *)fTables->getBytesNoCopy();
++	uint64_t *l0 = (uint64_t *)base;
++	uint64_t *l1 = (uint64_t *)(base + 0x1000);
++	for (unsigned i = 0; i < 512; i++) {
++		l0[i] = 0;
++		l1[i] = 0;
++	}
++	l0[0] = (fTablesPhys + 0x1000) | LPAE_TABLE;
++	for (unsigned i = 0; i < 4; i++) {
++		uint64_t *l2 = (uint64_t *)(base + 0x2000 + i * 0x1000);
++		for (unsigned j = 0; j < 512; j++) {
++			l2[j] = 0;
++		}
++		fL2[i] = l2;
++		l1[i] = (fTablesPhys + 0x2000 + i * 0x1000) | LPAE_TABLE;
++	}
++	flush_dcache((vm_offset_t)base, 0x10000, 0);
++	fVaNext = S8_GPU_VA_BASE;
++	return true;
++}
++
++uint64_t *
++S8Mali::l3For(uint64_t va)
++{
++	unsigned l2i = (unsigned)((va >> 30) & 3);
++	unsigned idx = (unsigned)((va >> 21) & 0x1ff);
++	uint64_t entry = fL2[l2i][idx];
++	uint8_t *base = (uint8_t *)fTables->getBytesNoCopy();
++
++	if (entry != 0) {
++		uint64_t pa = entry & ~0xfffULL;
++		for (unsigned c = 0; c < fL3Count; c++) {
++			if (pa >= fL3Phys[c] && pa < fL3Phys[c] + 0x10000) {
++				unsigned page = (unsigned)((pa - fL3Phys[c]) >> 12);
++				return (uint64_t *)((uint8_t *)fL3Chunk[c]->getBytesNoCopy() +
++				    page * 0x1000);
++			}
++		}
++		return NULL;
++	}
++	if (fL3Count >= S8_GPU_L3_CHUNKS) {
++		return NULL;
++	}
++	IOBufferMemoryDescriptor *chunk = IOBufferMemoryDescriptor::withOptions(
++	    kIOMemoryPhysicallyContiguous | kIODirectionOutIn | kIOMemoryMapperNone,
++	    0x10000, 0x10000);
++	if (chunk == NULL) {
++		return NULL;
++	}
++	uint64_t pa = chunk->getPhysicalAddress();
++	uint64_t *l3 = (uint64_t *)chunk->getBytesNoCopy();
++	for (unsigned i = 0; i < 512; i++) {
++		l3[i] = 0;
++	}
++	flush_dcache((vm_offset_t)l3, 0x1000, 0);
++	fL3Chunk[fL3Count] = chunk;
++	fL3Phys[fL3Count] = pa;
++	fL3Count++;
++	fL2[l2i][idx] = pa | LPAE_TABLE;
++	flush_dcache((vm_offset_t)base, 0x10000, 0);
++	return l3;
++}
++
++bool
++S8Mali::mapPage(uint64_t va, uint64_t pa, bool noexec)
++{
++	uint64_t *l3 = l3For(va);
++	if (l3 == NULL) {
++		return false;
++	}
++	unsigned i = (unsigned)((va >> 12) & 0x1ff);
++	l3[i] = pa | LPAE_PAGE | (noexec ? (1ULL << 54) : 0);
++	flush_dcache((vm_offset_t)&l3[i], 8, 0);
++	return true;
++}
++
++bool
++S8Mali::flushPageTables(void)
++{
++	flush_dcache((vm_offset_t)fTables->getBytesNoCopy(), 0x10000, 0);
++	for (unsigned c = 0; c < fL3Count; c++) {
++		flush_dcache((vm_offset_t)fL3Chunk[c]->getBytesNoCopy(), 0x10000, 0);
++	}
++	asCommand(AS_CMD_FLUSH_PT);
++	asCommand(AS_CMD_UPDATE);
++	return true;
++}
++
++S8GpuBo *
++S8Mali::allocBo(uint32_t size, uint32_t flags, uint32_t *handle)
++{
++	uint64_t sz = ((uint64_t)size + 0xfff) & ~0xfffULL;
++	if (sz == 0) {
++		sz = 0x1000;
++	}
++	if (fVaNext + sz > S8_GPU_VA_END) {
++		return NULL;
++	}
++	unsigned slot;
++	for (slot = 0; slot < S8_GPU_MAX_BOS; slot++) {
++		if (fBos[slot] == NULL) {
++			break;
++		}
++	}
++	if (slot == S8_GPU_MAX_BOS) {
++		return NULL;
++	}
++	IOBufferMemoryDescriptor *mem = IOBufferMemoryDescriptor::withOptions(
++	    kIODirectionOutIn | kIOMemoryMapperNone, (vm_size_t)sz, 1);
++	if (mem == NULL) {
++		return NULL;
++	}
++	S8GpuBo *bo = (S8GpuBo *)IOMalloc(sizeof(S8GpuBo));
++	if (bo == NULL) {
++		mem->release();
++		return NULL;
++	}
++	bo->handle = slot + 1;
++	bo->flags = flags;
++	bo->va = fVaNext;
++	bo->size = sz;
++	bo->mem = mem;
++	bo->vaCpu = mem->getBytesNoCopy();
++	bzero(bo->vaCpu, (size_t)sz);
++	fVaNext += sz;
++	fBos[slot] = bo;
++	*handle = bo->handle;
++	return bo;
++}
++
++S8GpuBo *
++S8Mali::findBo(uint32_t handle)
++{
++	if (handle == 0 || handle > S8_GPU_MAX_BOS) {
++		return NULL;
++	}
++	return fBos[handle - 1];
++}
++
++bool
++S8Mali::mapBo(S8GpuBo *bo)
++{
++	bool noexec = (bo->flags & 1) != 0;		/* PANFROST_BO_NOEXEC */
++	for (uint64_t off = 0; off < bo->size; ) {
++		IOByteCount len = 0;
++		IOPhysicalAddress pa = bo->mem->getPhysicalSegment(off, &len,
++		    kIOMemoryMapperNone);
++		if (pa == 0 || len == 0) {
++			return false;
++		}
++		for (IOByteCount p = 0; p < len; p += 0x1000) {
++			if (!mapPage(bo->va + off + p, pa + p, noexec)) {
++				return false;
++			}
++		}
++		off += len;
++	}
++	return flushPageTables();
++}
++
++void
++S8Mali::freeBo(S8GpuBo *bo)
++{
++	if (bo == NULL) {
++		return;
++	}
++	for (uint64_t off = 0; off < bo->size; off += 0x1000) {
++		uint64_t *l3 = l3For(bo->va + off);
++		if (l3 != NULL) {
++			l3[((bo->va + off) >> 12) & 0x1ff] = 0;
++		}
++	}
++	flushPageTables();
++	bo->mem->release();
++	fBos[bo->handle - 1] = NULL;
++	IOFree(bo, sizeof(S8GpuBo));
++}
++
++/* Two BOs mapped, one not: the GPU must write into the first through its
++ * GPU address, and a write to the unmapped one must fault and recover. */
++bool
++S8Mali::boTest(void)
++{
++	uint32_t ha = 0, hb = 0, hc = 0;
++	S8GpuBo *a = allocBo(0x1000, 0, &ha);
++	S8GpuBo *b = allocBo(0x1000, 0, &hb);
++	S8GpuBo *c = allocBo(0x1000, 0, &hc);
++	if (a == NULL || b == NULL || c == NULL) {
++		IOLog("S8 GPU: BO allocation failed\n");
++		return false;
++	}
++	if (!mapBo(a) || !mapBo(b)) {
++		IOLog("S8 GPU: BO mapping failed\n");
++		return false;
++	}
++	IOLog("S8 GPU: BOs A %u VA 0x%llx, B %u VA 0x%llx, C %u VA 0x%llx (unmapped)\n",
++	    ha, a->va, hb, b->va, hc, c->va);
++
++	{
++		/* write the chain into BO A at offset 0 */
++		uint32_t *job = (uint32_t *)a->vaCpu;
++		for (unsigned i = 0; i < 16; i++) {
++			job[i] = 0;
++		}
++		uint64_t target = b->va + 0x10;
++		job[4] = 1u | 2u << 1 | 1u << 16;
++		job[8] = (uint32_t)target;
++		job[9] = (uint32_t)(target >> 32);
++		job[10] = 6;
++		job[12] = 0x600dcafeu;
++	}
++	flush_dcache((vm_offset_t)a->vaCpu, a->size, 0);
++	flush_dcache((vm_offset_t)b->vaCpu, b->size, 0);
++
++	uint32_t raw = 0;
++	bool done = runJob(a->va, (uint32_t *)a->vaCpu, &raw);
++	uint32_t status = *(uint32_t *)a->vaCpu;
++	uint32_t got = *(volatile uint32_t *)((uint8_t *)b->vaCpu + 0x10);
++	IOLog("S8 GPU: BO job %s RAWSTAT 0x%x header status 0x%x B[0x10] 0x%x\n",
++	    done ? "done" : "TIMEOUT", raw, status, got);
++	if (!done || status != 1 || got != 0x600dcafeu) {
++		IOLog("S8 GPU: BO job failed\n");
++		return false;
++	}
++
++	/* write to the unmapped BO C: expect an MMU fault */
++	{
++		uint32_t *job = (uint32_t *)a->vaCpu;
++		uint64_t target = c->va + 0x10;
++		for (unsigned i = 0; i < 16; i++) {
++			job[i] = 0;
++		}
++		job[4] = 1u | 2u << 1 | 1u << 16;
++		job[8] = (uint32_t)target;
++		job[9] = (uint32_t)(target >> 32);
++		job[10] = 6;
++		job[12] = 0xbad0bad0u;
++	}
++	flush_dcache((vm_offset_t)a->vaCpu, a->size, 0);
++	done = runJob(a->va, (uint32_t *)a->vaCpu, &raw);
++	uint32_t mmu = rd(MMU_INT_RAWSTAT);
++	uint32_t fault = rd(AS0 + AS_FAULTSTATUS);
++	uint32_t faddr = rd(AS0 + AS_FAULTADDRESS_LO);
++	IOLog("S8 GPU: unmapped job %s RAWSTAT 0x%x MMU int 0x%x fault 0x%x at 0x%x\n",
++	    done ? "done (wrong)" : "did not complete", raw, mmu, fault, faddr);
++
++	/* the fault left the slot stopped: reset and re-init before anything else */
++	gpuReset();
++	gpuPowerUp();
++	asUpdate(fTablesPhys | LPAE_TRANSTAB);
++	freeBo(a);
++	freeBo(b);
++	freeBo(c);
++	return fault != 0;
 +}
 +
 +/* IOResources matching runs more than once during boot; the self test runs
@@ -1314,7 +1621,16 @@ index 0000000..ab7755a
 +	if (ok) {
 +		IOLog("S8 GPU: milestone 2a passed: a WRITE_VALUE job ran from XNU\n");
 +	}
-+	asUpdate(0);
++	bool bo_ok = false;
++	if (ok && tablesInit() && asUpdate(fTablesPhys | LPAE_TRANSTAB)) {
++		bo_ok = boTest();
++		if (bo_ok) {
++			IOLog("S8 GPU: milestone 2b (1/2) passed: BOs and a fault\n");
++		}
++	}
++	if (!fTables) {
++		asUpdate(0);
++	}
 +	gpuPowerDown();
 +	setProperty("s8gpu-selftest", ok ? "passed" : "failed");
 +	return ok;
