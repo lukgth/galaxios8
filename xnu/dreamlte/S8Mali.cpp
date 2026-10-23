@@ -280,7 +280,7 @@ S8Mali::asUpdate(uint64_t transtab)
 	wr64(AS0 + AS_TRANSTAB_LO, transtab);
 	wr64(AS0 + AS_MEMATTR_LO, 0x00888d88u);		/* as panfrost */
 	asCommand(AS_CMD_UPDATE);
-	if (rd64(AS0 + AS_FAULTSTATUS) != 0) {
+	if (rd(AS0 + AS_FAULTSTATUS) != 0) {
 		IOLog("S8 GPU: AS fault 0x%x at 0x%llx (STATUS 0x%x)\n",
 		    rd(AS0 + AS_FAULTSTATUS), rd64(AS0 + AS_FAULTADDRESS_LO),
 		    rd(AS0 + AS_STATUS));
@@ -432,8 +432,8 @@ S8Mali::start(IOService *provider)
 	}
 
 	fBlock = IOBufferMemoryDescriptor::withOptions(
-	    kIOMemoryPhysicallyContiguous | kIODirectionOutIn,
-	    S8_GPU_BLOCK_SIZE, PAGE_SIZE);
+	    kIOMemoryPhysicallyContiguous | kIODirectionOutIn | kIOMemoryMapperNone,
+	    S8_GPU_BLOCK_SIZE, S8_GPU_BLOCK_SIZE);
 	if (fBlock == NULL || fBlock->getPhysicalAddress() == 0) {
 		IOLog("S8 GPU: no contiguous memory block\n");
 		return false;
@@ -457,7 +457,7 @@ S8Mali::start(IOService *provider)
 	}
 	asUpdate(0);
 	gpuPowerDown();
-	setProperty("s8gpu-selftest", ok ? "passed" : "failed", 8);
+	setProperty("s8gpu-selftest", ok ? "passed" : "failed");
 	return ok;
 }
 
