@@ -32,6 +32,14 @@ void drmFreeVersion(drmVersionPtr version);
 int drmOpen(const char *name, const char *busid);
 int drmClose(int fd);
 
+/* Sync objects: the S8Mali client waits inside SUBMIT, so nothing waits here. */
+int drmSyncobjCreate(int fd, uint32_t flags, uint32_t *handle);
+int drmSyncobjDestroy(int fd, uint32_t handle);
+int drmSyncobjWait(int fd, uint32_t *handles, unsigned num_handles,
+    int64_t timeout_nsec, unsigned flags, uint32_t *first_signaled);
+int drmSyncobjImportSyncFile(int fd, uint32_t handle, int sync_file_fd);
+int drmSyncobjExportSyncFile(int fd, uint32_t handle, int *sync_file_fd);
+
 int drmPrimeHandleToFD(int fd, unsigned int handle, unsigned int flags, int *prime_fd);
 int drmPrimeFDToHandle(int fd, int prime_fd, unsigned int *handle);
 

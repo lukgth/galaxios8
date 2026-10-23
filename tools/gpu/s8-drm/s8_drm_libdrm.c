@@ -86,6 +86,56 @@ drmFreeVersion(drmVersionPtr v)
 	free(v);
 }
 
+int
+drmSyncobjCreate(int fd, uint32_t flags, uint32_t *handle)
+{
+	(void)fd;
+	(void)flags;
+	(void)handle;
+	errno = ENOSYS;
+	return -1;
+}
+
+int
+drmSyncobjDestroy(int fd, uint32_t handle)
+{
+	(void)fd;
+	(void)handle;
+	return 0;
+}
+
+int
+drmSyncobjWait(int fd, uint32_t *handles, unsigned num_handles,
+    int64_t timeout_nsec, unsigned flags, uint32_t *first_signaled)
+{
+	(void)fd;
+	(void)handles;
+	(void)num_handles;
+	(void)timeout_nsec;
+	(void)flags;
+	(void)first_signaled;
+	return 0;	/* SUBMIT waits for the job, so a fence is always ready */
+}
+
+int
+drmSyncobjImportSyncFile(int fd, uint32_t handle, int sync_file_fd)
+{
+	(void)fd;
+	(void)handle;
+	(void)sync_file_fd;
+	return 0;
+}
+
+int
+drmSyncobjExportSyncFile(int fd, uint32_t handle, int *sync_file_fd)
+{
+	(void)fd;
+	(void)handle;
+	(void)sync_file_fd;
+	errno = ENOSYS;
+	return -1;
+}
+
 /* The S8Mali user client has no dma-buf export or import yet. */
 int
 drmPrimeHandleToFD(int fd, unsigned int handle, unsigned int flags, int *prime_fd)
