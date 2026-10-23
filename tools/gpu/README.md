@@ -26,6 +26,29 @@ The submit call is synchronous: the kernel programs the job slot, polls it and r
 
 It is not built here. It needs the iOS SDK.
 
+## Building this on a macOS runner
+
+No Mac is needed here. Two workflows do the work:
+
+- `.github/workflows/ios-userland.yml` builds `s8_test` and `libs8drm.a`
+  with Xcode and the iPhoneOS SDK, and uploads them as the `ios-userland`
+  artifact.
+- `.github/workflows/mesa.yml` fetches Mesa 25.0.7, configures it with a
+  cross file that targets `arm64-apple-ios16.0`, and uploads what it built.
+
+`gh run download RUN_ID -n ios-userland -D out` puts the binaries on this
+workstation. The root image then gets them:
+
+1. Mount `ios16-root.img` read-write with `-o force`.
+2. Copy `s8_test` to `/usr/bin/s8_test`, mode 0755, owner 0:0.
+3. Add `/Library/LaunchDaemons/com.s8.gputest.plist` with `RunAtLoad`.
+4. Unmount and run `fsck.hfsplus -f -n`.
+5. Write the image to USERDATA with `flash-chunks.sh`.
+
+The test writes `/var/log/s8-gpu-test.txt`, and the kernel logs the same
+calls into the ring: `S8 GPU: GET_PARAM`, `S8 GPU: user BO`, `S8 GPU:
+submit ok`. Read the ring from TWRP, no root pull needed.
+
 ## The Mac steps
 
 1. Build Mesa 25.0.7 (`-Dgallium-drivers=panfrost -Dplatforms= -Dosmesa=true`, no LLVM) with the iOS SDK, as `hackios-xnu-userland/tools/mk-mesa.sh` does for their GPU. Keep 25.0.7: OSMesa is gone in 25.1.
