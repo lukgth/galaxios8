@@ -2279,7 +2279,7 @@ index 55d0057..c2e7a72 100644
  	int32_t rc = sweet_psci_cpu_on(cpu->phys_id, entry, getCPUNumber());
  	IOLog(CPU_PORT_NAME " CPU: cpu=%u PSCI CPU_ON rc=%d\n", getCPUNumber(), rc);
 diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
-index 356ff51..9161b9f 100644
+index 356ff51..368bab7 100644
 --- a/iokit/Kernel/arm/SweetFramebuffer.cpp
 +++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
 @@ -48,6 +48,7 @@ extern "C" int sweet_console_muted;     /* osfmk/console/serial_console.c */
@@ -2341,7 +2341,7 @@ index 356ff51..9161b9f 100644
  	fVsync->setTimeoutUS(SWEET_FB_VSYNC_US);
  
  	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
-@@ -302,6 +316,475 @@ get32(const uint8_t *p, uint32_t off)
+@@ -302,6 +316,486 @@ get32(const uint8_t *p, uint32_t off)
  	return v;
  }
  
@@ -2573,6 +2573,7 @@ index 356ff51..9161b9f 100644
 +#if defined(DREAMLTE)
 +static IOLock *sweet_fb_present_lock;
 +static uintptr_t sweet_fb_stage, sweet_fb_panel;
++static bool sweet_fb_trace;
 +static uint64_t sweet_fb_stride;
 +static int32_t sweet_fb_rows;
 +static bool sweet_fb_stage_pending;
@@ -2810,6 +2811,16 @@ index 356ff51..9161b9f 100644
 +		sweet_fb_wait_ticks += t1 - t0;
 +		sweet_fb_panel_ticks += mach_absolute_time() - t1;
 +		sweet_fb_panel_copies++;
++		if (sweet_fb_trace && (sweet_fb_panel_copies % 30) == 0) {
++			volatile uint32_t *pf = (volatile uint32_t *)sweet_fb_panel;
++			volatile uint32_t *sf = (volatile uint32_t *)sweet_fb_stage;
++			uint32_t mid = (uint32_t)sweet_fb_stage_w * (uint32_t)sweet_fb_stage_h / 2;
++			uint32_t pmid = (uint32_t)(sweet_fb_stride / 4) * (uint32_t)sweet_fb_rows / 2;
++			uint32_t pend = sweet_fb_decon ?
++			    *(volatile uint32_t *)(sweet_fb_decon + 0x4c) : 0;
++			IOLog("S8 FBTRACE: copies %llu stage %08x %08x panel %08x %08x decon 0x%x\n",
++			    sweet_fb_panel_copies, sf[0], sf[mid], pf[0], pf[pmid], pend);
++		}
 +	}
 +}
 +#endif
@@ -2817,7 +2828,7 @@ index 356ff51..9161b9f 100644
  static uint32_t sweet_fb_swaps_logged;
  static uint64_t sweet_fb_swap_count;
  
-@@ -318,7 +801,16 @@ AppleCLCD::swap(const uint8_t *rec)
+@@ -318,7 +812,16 @@ AppleCLCD::swap(const uint8_t *rec)
  	IOLockLock(fLock);
  	memcpy(fPending, rec, SWEET_FB_SWAP_REC_SIZE);
  	fDirty = true;
@@ -2834,7 +2845,7 @@ index 356ff51..9161b9f 100644
  	if ((++sweet_fb_swap_count % 1000) == 0) {
  		IOLog("SWEET FB: %llu swaps\n", sweet_fb_swap_count);
  	}
-@@ -328,6 +820,138 @@ void
+@@ -328,6 +831,141 @@ void
  AppleCLCD::present(const uint8_t *rec)
  {
  	uint32_t mask = get32(rec, 0x104);
@@ -2848,6 +2859,9 @@ index 356ff51..9161b9f 100644
 +		sweet_fb_rows = (int32_t)fHeight;
 +		int scale = 0;
 +		PE_parse_boot_argn("sweetfb_scale", &scale, sizeof(scale));
++		int trace = 0;
++		PE_parse_boot_argn("s8fbtrace", &trace, sizeof(trace));
++		sweet_fb_trace = trace != 0;
 +		sweet_fb_scaled = scale != 0 && (fLogicalW != fWidth || fLogicalH != fHeight) &&
 +		    fLogicalW <= fWidth && fLogicalH <= fHeight;
 +		sweet_fb_stage_w = sweet_fb_scaled ? fLogicalW : fWidth;
@@ -2973,7 +2987,7 @@ index 356ff51..9161b9f 100644
  
  
  	if (!fConsolePaused) {
-@@ -380,8 +1004,13 @@ AppleCLCD::present(const uint8_t *rec)
+@@ -380,8 +1018,13 @@ AppleCLCD::present(const uint8_t *rec)
  			dx = dy = 0;
  		}
  		/* Logical (presented) display coordinates -> panel coordinates. */
@@ -2987,7 +3001,7 @@ index 356ff51..9161b9f 100644
  		if (dx < 0) {
  			sx -= dx;
  			w += dx;
-@@ -398,12 +1027,21 @@ AppleCLCD::present(const uint8_t *rec)
+@@ -398,12 +1041,21 @@ AppleCLCD::present(const uint8_t *rec)
  		if (h > (int32_t)s->height - sy) {
  			h = (int32_t)s->height - sy;
  		}
@@ -3009,7 +3023,7 @@ index 356ff51..9161b9f 100644
  		uint64_t last = (uint64_t)s->offset + (uint64_t)(sy + h - 1) * s->bytesPerRow +
  		    (uint64_t)(sx + w) * 4;
  		if (w <= 0 || h <= 0 || s->elementWidth != 1 || s->elementHeight != 1 ||
-@@ -411,14 +1049,49 @@ AppleCLCD::present(const uint8_t *rec)
+@@ -411,14 +1063,49 @@ AppleCLCD::present(const uint8_t *rec)
  			src = 0;
  		}
  		if (src != 0 && bpe == 4) {

@@ -2636,3 +2636,36 @@ edit('iokit/KernelConfigTables.cpp', [(
     "    \"     'IOProviderClass' = IOResources;\"\n"
     "    \"     'IOMatchCategory' = S8Mali;\"\n"
     "    \"   },\"\n", 1)])
+
+# ---- Framebuffer trace: is the panel memory being written and scanned? ----
+# Boot arg s8fbtrace=1. Every 30 presented copies the kernel logs the first
+# and middle pixel of the stage and of the panel buffer, plus the DECON
+# FRAME_DONE pending bit, so a picture that does not change on the panel can
+# be told apart from a copy that never lands.
+edit('iokit/Kernel/arm/SweetFramebuffer.cpp', [
+    ('static uintptr_t sweet_fb_stage, sweet_fb_panel;\n',
+     'static uintptr_t sweet_fb_stage, sweet_fb_panel;\nstatic bool sweet_fb_trace;\n', 1),
+    ('\t\tint scale = 0;\n\t\tPE_parse_boot_argn("sweetfb_scale", &scale, sizeof(scale));\n',
+     '\t\tint scale = 0;\n\t\tPE_parse_boot_argn("sweetfb_scale", &scale, sizeof(scale));\n'
+     '\t\tint trace = 0;\n'
+     '\t\tPE_parse_boot_argn("s8fbtrace", &trace, sizeof(trace));\n'
+     '\t\tsweet_fb_trace = trace != 0;\n', 1),
+    ('\t\tsweet_fb_panel_ticks += mach_absolute_time() - t1;\n'
+     '\t\tsweet_fb_panel_copies++;\n'
+     '\t}\n'
+     '}\n',
+     '\t\tsweet_fb_panel_ticks += mach_absolute_time() - t1;\n'
+     '\t\tsweet_fb_panel_copies++;\n'
+     '\t\tif (sweet_fb_trace && (sweet_fb_panel_copies % 30) == 0) {\n'
+     '\t\t\tvolatile uint32_t *pf = (volatile uint32_t *)sweet_fb_panel;\n'
+     '\t\t\tvolatile uint32_t *sf = (volatile uint32_t *)sweet_fb_stage;\n'
+     '\t\t\tuint32_t mid = (uint32_t)sweet_fb_stage_w * (uint32_t)sweet_fb_stage_h / 2;\n'
+     '\t\t\tuint32_t pmid = (uint32_t)(sweet_fb_stride / 4) * (uint32_t)sweet_fb_rows / 2;\n'
+     '\t\t\tuint32_t pend = sweet_fb_decon ?\n'
+     '\t\t\t    *(volatile uint32_t *)(sweet_fb_decon + 0x4c) : 0;\n'
+     '\t\t\tIOLog("S8 FBTRACE: copies %llu stage %08x %08x panel %08x %08x decon 0x%x\\n",\n'
+     '\t\t\t    sweet_fb_panel_copies, sf[0], sf[mid], pf[0], pf[pmid], pend);\n'
+     '\t\t}\n'
+     '\t}\n'
+     '}\n', 1),
+])
