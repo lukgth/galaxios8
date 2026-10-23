@@ -883,3 +883,32 @@ the presenter (frames are copied on every swap), DECON (frame done fires).
 
 Next for the UI: the slower software renderer is the frame-rate limit, so
 the GPU work is the priority.
+
+### Mali driver 2b on the phone and iOS userland in CI (2026-10-24)
+
+- `s8-gpu4-boot.img` `9eebe5a5...` (CI 40026355107): job 1 finished with
+  the right value and `header status 0x1` (the status fix works). Job 2
+  faulted: `AS fault 0x7c0003c1 at 0x10000020`, because the test mapped the
+  second VA window in the wrong 1 GiB entry. Fixed with a second L2 table.
+- Review of the driver (`docs/DREAMLTE_GPU.md`, "Known gaps") led to: job
+  slot from the fragment requirement, cache invalidation after a job,
+  write-combined client mappings, fault recovery inside submit, GPU TMU
+  readout, `GPU_PROD_ID` = 0x6000 (the model id Linux reports), mapping of
+  buffers deferred while the GPU is off, 256 buffer objects.
+- The G3D clock request goes through SweetCPU: `s8_acpm_gpu_khz()` sends
+  `FREQ_REQ` for `dvfs_g3d` (ACPM id 4) on the channel the DVFS thread
+  already owns. Used only when the driver has to power the domain itself.
+- `.github/workflows/ios-userland.yml` builds iOS arm64 user space on a
+  macOS runner (Xcode 15.4, iPhoneOS 17.5 SDK). First artifact: `s8_test`,
+  a process that opens `S8Mali`, creates and maps two buffer objects and
+  submits a WRITE_VALUE job (the panfrost UAPI), plus `libs8drm.a`, the
+  libdrm stand-in for Mesa.
+- The root image now carries `/usr/bin/s8_test` and
+  `/Library/LaunchDaemons/com.s8.gputest.plist` (RunAtLoad), so every boot
+  runs the user client test. Image `work/ios16-root.img`
+  `63729533...` (12 GiB used). The driver logs the user client calls
+  (`S8 GPU: GET_PARAM`, `user BO`, `submit ok`) into the ring, so the
+  result is readable from TWRP without pulling the root.
+- `.github/workflows/mesa.yml` cross-builds Mesa 25.0.7 for iOS (softpipe
+  and OSMesa first). The macOS runner supplies the SDK that this Linux
+  workstation does not have.
