@@ -853,3 +853,33 @@ Observations from the logs:
   times. A static "already ran" guard now limits it to one.
 - Not yet re-tested: job 2 through the `0x10000000` VA window and the
   unmapped-page check.
+
+### Why the screen showed only logs, and the SpringBoard abort (2026-10-24)
+
+Two separate faults were found and fixed:
+
+1. The panel showed the kernel console, not the UI, because the boot line
+   lacked `a5fb_noconsole=1`. The DVFS thread prints a line every 30 s, and
+   each print repainted the console over the framebuffer. The documented
+   boot line in `docs/s8-install.md` has the argument; the images built in
+   this session did not.
+2. With the console off the panel kept the Apple logo, because SpringBoard
+   crashed. `logs/sweetlog-ui1.txt` shows SpringBoard aborting (signal 6,
+   reason namespace 2) three times at the same PC. Symbolicated with
+   `tools/sweet-crash.py` and the 20H392 shared cache:
+
+   - deepest frame `-[_UIScreenComplexBoundingPathUtilities
+     _loadBitmapForScreen:type:] + 804`, then `_objc_exception_throw` ->
+     `std::terminate` -> `abort`.
+   - UIKit rasterizes the screen mask; with a 1125x2436 canvas on a
+     1440x2960 panel the exception is thrown and SpringBoard dies.
+
+   Fix: boot with the native canvas (`sweetfb_native=1`, 1440x2960). The
+   user confirmed the lock screen appears; the `native1` run is the first
+   image of this session that reaches the UI.
+
+Not the cause: backlight (the port sets none; S-Boot leaves the panel on),
+the presenter (frames are copied on every swap), DECON (frame done fires).
+
+Next for the UI: the slower software renderer is the frame-rate limit, so
+the GPU work is the priority.
