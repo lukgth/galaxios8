@@ -842,7 +842,7 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..9a74d7a
+index 0000000..131bfe7
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
 @@ -0,0 +1,480 @@
@@ -874,7 +874,7 @@ index 0000000..9a74d7a
 +#include <IOKit/IOLib.h>
 +#include <IOKit/IOTypes.h>
 +#include <pexpert/pexpert.h>
-+#include <vm/vm_kern.h>
++#include <pexpert/arm64/board_config.h>
 +
 +extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 +extern "C" void flush_dcache(vm_offset_t addr, unsigned count, int phys);

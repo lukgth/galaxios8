@@ -26,7 +26,7 @@
 #include <IOKit/IOLib.h>
 #include <IOKit/IOTypes.h>
 #include <pexpert/pexpert.h>
-#include <vm/vm_kern.h>
+#include <pexpert/arm64/board_config.h>
 
 extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 extern "C" void flush_dcache(vm_offset_t addr, unsigned count, int phys);
