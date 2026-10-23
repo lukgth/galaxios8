@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..ee3679f
+index 0000000..ab7755a
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,480 @@
+@@ -0,0 +1,491 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -1179,6 +1179,8 @@ index 0000000..ee3679f
 +	job[13] = 0;
 +}
 +
++/* The job header's first word holds the exception status (1 = DONE), as the
++ * loader logged in c30b; JS_STATUS is 0 again once the job left the slot. */
 +bool
 +S8Mali::runJob(uint64_t jc, uint32_t *rawstat, uint32_t *status)
 +{
@@ -1200,7 +1202,8 @@ index 0000000..ee3679f
 +		IODelay(1);
 +	}
 +	*rawstat = rd(JOB_INT_RAWSTAT);
-+	*status = rd(JS0 + JS_STATUS);
++	*status = *(volatile uint32_t *)((uint8_t *)fBlockVa +
++	    (uint32_t)(jc - fBlockPhys));
 +	flush_dcache((vm_offset_t)fBlockVa, S8_GPU_BLOCK_SIZE, 0);
 +	return done;
 +}
@@ -1237,16 +1240,16 @@ index 0000000..ee3679f
 +
 +	uint32_t raw = 0, status = 0;
 +	bool done = runJob(jobPa, &raw, &status);
-+	IOLog("S8 GPU: job 1 %s RAWSTAT 0x%x JS_STATUS 0x%x data[4] 0x%x\n",
++	IOLog("S8 GPU: job 1 %s RAWSTAT 0x%x header status 0x%x data[4] 0x%x\n",
 +	    done ? "done" : "TIMEOUT", raw, status, data[4]);
 +	if (!done || status != 1 || data[4] != 0xc0ffee11u) {
-+		IOLog("S8 GPU: job 1 failed (expected status 1, 0xc0ffee11)\n");
++		IOLog("S8 GPU: job 1 failed (expected header status 1 and 0xc0ffee11)\n");
 +		return false;
 +	}
 +	data[8] = 0;
 +	flush_dcache((vm_offset_t)fBlockVa, S8_GPU_BLOCK_SIZE, 0);
 +	done = runJob(jobPa + 0x40, &raw, &status);
-+	IOLog("S8 GPU: job 2 %s RAWSTAT 0x%x JS_STATUS 0x%x data[8] 0x%x witness 0x%x\n",
++	IOLog("S8 GPU: job 2 %s RAWSTAT 0x%x header status 0x%x data[8] 0x%x witness 0x%x\n",
 +	    done ? "done" : "TIMEOUT", raw, status, data[8], *witness);
 +	if (!done || status != 1 || data[8] != 0xc0ffee22u || *witness != 0xdead0000u) {
 +		IOLog("S8 GPU: job 2 failed (expected 0xc0ffee22 through the VA "
@@ -1255,6 +1258,10 @@ index 0000000..ee3679f
 +	}
 +	return true;
 +}
++
++/* IOResources matching runs more than once during boot; the self test runs
++ * on the first instance only. */
++static bool s8_gpu_ran;
 +
 +bool
 +S8Mali::start(IOService *provider)
@@ -1266,6 +1273,10 @@ index 0000000..ee3679f
 +	if (!IOService::start(provider)) {
 +		return false;
 +	}
++	if (s8_gpu_ran) {
++		return true;
++	}
++	s8_gpu_ran = true;
 +	fMali = NULL;
 +	fPmu = NULL;
 +	fBlock = NULL;
