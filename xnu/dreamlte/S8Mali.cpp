@@ -127,6 +127,7 @@ extern "C" void flush_dcache(vm_offset_t addr, unsigned count, int phys);
 #define S8_GPU_TT_L1		0x1000
 #define S8_GPU_TT_L2		0x2000
 #define S8_GPU_TT_L3		0x3000
+#define S8_GPU_TT_L2_VA		0x7000
 #define S8_GPU_JOB		0x4000
 #define S8_GPU_DATA		0x5000
 #define S8_GPU_WITNESS		0x6000	/* never mapped: must stay untouched */
@@ -201,6 +202,7 @@ private:
 	bool mapBo(S8GpuBo *bo);
 	void freeBo(S8GpuBo *bo);
 	bool boTest(void);
+	bool uapiTest(void);
 
 public:
 	/* User client API (panfrost UAPI numbers) */
@@ -364,18 +366,22 @@ S8Mali::buildTables(void)
 	uint64_t *l1 = (uint64_t *)((uint8_t *)fBlockVa + S8_GPU_TT_L1);
 	uint64_t *l2 = (uint64_t *)((uint8_t *)fBlockVa + S8_GPU_TT_L2);
 	uint64_t *l3 = (uint64_t *)((uint8_t *)fBlockVa + S8_GPU_TT_L3);
+	uint64_t *l2v = (uint64_t *)((uint8_t *)fBlockVa + S8_GPU_TT_L2_VA);
 	uint64_t dataPa = base + S8_GPU_DATA;
 	uint64_t jobPa = base + S8_GPU_JOB;
 
 	for (unsigned i = 0; i < 512; i++) {
-		l0[i] = l1[i] = l2[i] = l3[i] = 0;
+		l0[i] = l1[i] = l2[i] = l3[i] = l2v[i] = 0;
 	}
 	l0[0] = (base + S8_GPU_TT_L1) | LPAE_TABLE;
 	l1[(dataPa >> 30) & 0x1ff] = (base + S8_GPU_TT_L2) | LPAE_TABLE;
 	l2[(dataPa >> 21) & 0x1ff] = (base + S8_GPU_TT_L3) | LPAE_TABLE;
 	l3[(dataPa >> 12) & 0x1ff] = dataPa | LPAE_PAGE;
-	l3[(va >> 12) & 0x1ff] = dataPa | LPAE_PAGE;
 	l3[(jobPa >> 12) & 0x1ff] = jobPa | LPAE_PAGE;
+	/* 0x10000000 is in 1 GiB entry 0; the table above serves 0x883... */
+	l1[(va >> 30) & 0x1ff] = (base + S8_GPU_TT_L2_VA) | LPAE_TABLE;
+	l2v[(va >> 21) & 0x1ff] = (base + S8_GPU_TT_L3) | LPAE_TABLE;
+	l3[(va >> 12) & 0x1ff] = dataPa | LPAE_PAGE;
 	return true;
 }
 
@@ -866,9 +872,9 @@ S8MaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *a
 		}
 		s8_pf_submit s;
 		if (out != NULL && outSize >= sizeof(s)) {
-			memcpy(&s, out, sizeof(s));	/* the shim may pass it in either */
+			bcopy(&s, out, sizeof(s));	/* the shim may pass it in either */
 		} else {
-			memcpy(&s, in, sizeof(s));
+			bcopy(in, &s, sizeof(s));
 		}
 		ret = fGpu->userSubmit(s.jc, s.requirements);
 		break;
@@ -878,7 +884,7 @@ S8MaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *a
 			break;
 		}
 		s8_pf_wait_bo s;
-		memcpy(&s, in, sizeof(s));
+		bcopy(in, &s, sizeof(s));
 		ret = fGpu->userWaitBo(s.handle, s.timeout_ns);
 		break;
 	}
@@ -888,10 +894,10 @@ S8MaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *a
 			break;
 		}
 		s8_pf_create_bo s;
-		memcpy(&s, in, sizeof(s));
+		bcopy(in, &s, sizeof(s));
 		ret = fGpu->userCreateBo(s.size, s.flags, &s.handle, &s.offset);
 		if (ret == kIOReturnSuccess) {
-			memcpy(out, &s, sizeof(s));
+			bcopy(&s, out, sizeof(s));
 		}
 		break;
 	}
@@ -901,10 +907,10 @@ S8MaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *a
 			break;
 		}
 		s8_pf_mmap_bo s;
-		memcpy(&s, in, sizeof(s));
+		bcopy(in, &s, sizeof(s));
 		ret = fGpu->userMmapBo(s.handle, &s.offset);
 		if (ret == kIOReturnSuccess) {
-			memcpy(out, &s, sizeof(s));
+			bcopy(&s, out, sizeof(s));
 		}
 		break;
 	}
@@ -914,11 +920,11 @@ S8MaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *a
 			break;
 		}
 		s8_pf_get_param s;
-		memcpy(&s, in, sizeof(s));
+		bcopy(in, &s, sizeof(s));
 		ret = fGpu->userGetParam(s.param, &s.value) == 0 ?
 		    kIOReturnSuccess : kIOReturnBadArgument;
 		if (ret == kIOReturnSuccess) {
-			memcpy(out, &s, sizeof(s));
+			bcopy(&s, out, sizeof(s));
 		}
 		break;
 	}
@@ -928,10 +934,10 @@ S8MaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *a
 			break;
 		}
 		s8_pf_get_bo_offset s;
-		memcpy(&s, in, sizeof(s));
+		bcopy(in, &s, sizeof(s));
 		ret = fGpu->userGetBoOffset(s.handle, &s.offset);
 		if (ret == kIOReturnSuccess) {
-			memcpy(out, &s, sizeof(s));
+			bcopy(&s, out, sizeof(s));
 		}
 		break;
 	}
@@ -941,10 +947,10 @@ S8MaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *a
 			break;
 		}
 		s8_pf_madvise s;
-		memcpy(&s, in, sizeof(s));
+		bcopy(in, &s, sizeof(s));
 		ret = fGpu->userMadvise(s.handle, s.madv, &s.retained);
 		if (ret == kIOReturnSuccess) {
-			memcpy(out, &s, sizeof(s));
+			bcopy(&s, out, sizeof(s));
 		}
 		break;
 	}
@@ -1181,6 +1187,52 @@ S8Mali::userBoMemory(vm_offset_t type)
 	return bo->mem;
 }
 
+/* Exercise the calls the user client exposes, without a user process:
+ * create two BOs, submit a chain through the GPU address of the first that
+ * writes into the second, wait, advise and free. Boot arg s8gpu=3. */
+bool
+S8Mali::uapiTest(void)
+{
+	uint32_t ha = 0, hb = 0;
+	uint64_t va = 0, va2 = 0;
+
+	if (!userOpen()) {
+		IOLog("S8 GPU: UAPI open failed\n");
+		return false;
+	}
+	if (userCreateBo(0x2000, 0, &ha, &va) != kIOReturnSuccess ||
+	    userCreateBo(0x1000, 0, &hb, &va2) != kIOReturnSuccess) {
+		IOLog("S8 GPU: UAPI create failed\n");
+		return false;
+	}
+	uint64_t cpuA = vaToCpu(va, NULL), cpuB = vaToCpu(va2, NULL);
+	if (cpuA == 0 || cpuB == 0) {
+		IOLog("S8 GPU: UAPI address lookup failed\n");
+		return false;
+	}
+	uint32_t *job = (uint32_t *)cpuA;
+	uint64_t target = va2 + 0x40;
+	for (unsigned i = 0; i < 16; i++) {
+		job[i] = 0;
+	}
+	job[4] = 1u | 2u << 1 | 1u << 16;
+	job[8] = (uint32_t)target;
+	job[9] = (uint32_t)(target >> 32);
+	job[10] = 6;
+	job[12] = 0x5a5a1234u;
+
+	IOReturn ret = userSubmit(va, 0);
+	uint32_t got = *(volatile uint32_t *)((uint8_t *)cpuB + 0x40);
+	uint32_t retained = 0;
+	userWaitBo(hb, 0);
+	userMadvise(hb, 0, &retained);
+	userFreeBo(ha);
+	userFreeBo(hb);
+	IOLog("S8 GPU: UAPI submit 0x%x -> B[0x40] 0x%x retained %u\n",
+	    ret, got, retained);
+	return ret == kIOReturnSuccess && got == 0x5a5a1234u;
+}
+
 /* IOResources matching runs more than once during boot; the self test runs
  * on the first instance only. */
 static bool s8_gpu_ran;
@@ -1249,6 +1301,10 @@ S8Mali::start(IOService *provider)
 		if (bo_ok) {
 			IOLog("S8 GPU: milestone 2b (1/2) passed: BOs and a fault\n");
 		}
+	}
+	if (bo_ok && enable >= 3) {
+		bool uapi_ok = uapiTest();
+		IOLog("S8 GPU: UAPI test %s\n", uapi_ok ? "passed" : "failed");
 	}
 	if (!fTables) {
 		asUpdate(0);
