@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..70d432b
+index 0000000..a40e59c
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,1381 @@
+@@ -0,0 +1,1389 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -1129,6 +1129,13 @@ index 0000000..70d432b
 +	bool on = waitBitsAt(fPmu, 0, 0xf, 0xf, 10000);
 +	IOLog("S8 GPU: G3D domain %s (PMU 0x%x)\n", on ? "on" : "did not come on",
 +	    *(volatile uint32_t *)fPmu);
++	if (on) {
++		/* The PLL alone does not set the rate: the APM firmware owns it. */
++		extern "C" int s8_acpm_gpu_khz(uint32_t khz, uint32_t *ans);
++		uint32_t ans = 0;
++		int rc = s8_acpm_gpu_khz(260000, &ans);
++		IOLog("S8 GPU: ACPM g3d 260 MHz rc %d rate %u\n", rc, ans);
++	}
 +	return on;
 +}
 +
@@ -1701,7 +1708,8 @@ index 0000000..70d432b
 +	if (mem == NULL) {
 +		return kIOReturnBadArgument;
 +	}
-+	*options = 0;
++	/* Linux maps panfrost BOs write-combined; the client gets the same. */
++	*options = kIOMapWriteCombineCache;
 +	*descriptor = mem;
 +	return kIOReturnSuccess;
 +}
@@ -2345,7 +2353,7 @@ index 9969739..0535b28 100644
  	poll();
  	if (fReal) {
 diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
-index 55d0057..c2e7a72 100644
+index 55d0057..4522920 100644
 --- a/iokit/Kernel/arm/SweetCPU.cpp
 +++ b/iokit/Kernel/arm/SweetCPU.cpp
 @@ -17,6 +17,9 @@
@@ -2358,7 +2366,7 @@ index 55d0057..c2e7a72 100644
  
  extern "C" void sweet_secondary_entry(void);
  extern "C" boolean_t sweet_cpu_signal_is_enabled(unsigned int cpu);
-@@ -66,6 +69,376 @@ public:
+@@ -66,6 +69,397 @@ public:
  
  OSDefineMetaClassAndStructors(SweetCPU, IOCPU);
  
@@ -2381,6 +2389,7 @@ index 55d0057..c2e7a72 100644
 +#define S8_ACPM_CH_DVFS		0       /* CMU node clock-controller@0x15a80000 */
 +#define S8_DVFS_BIG		2       /* dvfs_cpucl0, Mongoose */
 +#define S8_DVFS_LIT		3       /* dvfs_cpucl1, A53 */
++#define S8_DVFS_G3D		4       /* dvfs_g3d, Mali */
 +#define S8_FREQ_REQ		0
 +#define S8_FREQ_GET		1
 +
@@ -2558,6 +2567,25 @@ index 55d0057..c2e7a72 100644
 +	return rc;
 +}
 +
++static bool s8_acpm_up;
++
++/* Used by S8Mali when it has to power the GPU domain itself. The DVFS
++ * thread owns the channel; it sends only when a level changes, and this
++ * call happens once, at GPU start. */
++extern "C" int
++s8_acpm_gpu_khz(uint32_t khz, uint32_t *ans)
++{
++	uint32_t a = 0;
++	if (!s8_acpm_up) {
++		return -14;
++	}
++	int rc = s8_acpm_freq(S8_DVFS_G3D, S8_FREQ_REQ, khz, &a);
++	if (ans != NULL) {
++		*ans = a;
++	}
++	return rc;
++}
++
 +static uint32_t
 +s8_pll_mhz(volatile uint8_t *cmu)
 +{
@@ -2654,6 +2682,7 @@ index 55d0057..c2e7a72 100644
 +		thread_terminate(current_thread());
 +		return;
 +	}
++	s8_acpm_up = true;
 +	/* FREQ_GET answers 0 (run c10), so the PLLs tell the current level. */
 +	fbig = s8_pll_mhz(s8_cmu0) * 1000;
 +	flit = s8_pll_mhz(s8_cmu1) * 1000;
@@ -2735,7 +2764,7 @@ index 55d0057..c2e7a72 100644
  bool
  SweetCPU::start(IOService *provider)
  {
-@@ -84,8 +457,15 @@ SweetCPU::start(IOService *provider)
+@@ -84,8 +478,15 @@ SweetCPU::start(IOService *provider)
  #if defined(A5XELTE)
  	/* Linux's Exynos7580 DT: logical 0..3 = MPIDR 0..3;
  	 * logical 4..7 = MPIDR 0x100..0x103. */
@@ -2751,7 +2780,7 @@ index 55d0057..c2e7a72 100644
  	if (cpu->phys_id != expected_mpidr ||
  	    topology->num_cpus > SWEET_SMP_MAX_CPUS) {
  		panic(CPU_PORT_NAME " CPU: unsupported topology cpu=%u mpidr=0x%x count=%u",
-@@ -168,9 +548,9 @@ SweetCPU::startAll(void *arg __unused, wait_result_t result __unused)
+@@ -168,9 +569,9 @@ SweetCPU::startAll(void *arg __unused, wait_result_t result __unused)
  		}
  		IOSleep(1);
  	}
@@ -2764,7 +2793,7 @@ index 55d0057..c2e7a72 100644
  	}
  	for (unsigned int i = 0; i < topology->num_cpus; i++) {
  		SweetCPU *cpu = __atomic_load_n(&sweet_cpus[i], __ATOMIC_ACQUIRE);
-@@ -189,8 +569,13 @@ SweetCPU::startAll(void *arg __unused, wait_result_t result __unused)
+@@ -189,8 +590,13 @@ SweetCPU::startAll(void *arg __unused, wait_result_t result __unused)
  			}
  			IOSleep(1);
  		}
@@ -2778,7 +2807,7 @@ index 55d0057..c2e7a72 100644
  	}
  	/* Publish exactly once, after every selected CPU has completed initCPU(). */
  	ml_cpu_init_completed();
-@@ -199,6 +584,23 @@ SweetCPU::startAll(void *arg __unused, wait_result_t result __unused)
+@@ -199,6 +605,23 @@ SweetCPU::startAll(void *arg __unused, wait_result_t result __unused)
  	ml_set_max_cpus(topology->max_cpu_id + 1);
  	IOLog(CPU_PORT_NAME " CPU: %u/%u CPUs initialized, SGI1 verified\n",
  	    topology->num_cpus, topology->num_cpus);
@@ -2802,7 +2831,7 @@ index 55d0057..c2e7a72 100644
  	thread_terminate(current_thread());
  }
  
-@@ -240,6 +642,11 @@ SweetCPU::initCPU(bool boot)
+@@ -240,6 +663,11 @@ SweetCPU::initCPU(bool boot)
  	kprintf(CPU_PORT_NAME " CPU: cpu=%u entered initCPU mpidr=0x%llx EL%llu IRQs=%u\n",
  	    getCPUNumber(), __builtin_arm_rsr64("MPIDR_EL1") & 0xffffULL,
  	    __builtin_arm_rsr64("CurrentEL") >> 2, ml_get_interrupts_enabled());
@@ -2814,7 +2843,7 @@ index 55d0057..c2e7a72 100644
  	__atomic_store_n(&initialized, 1, __ATOMIC_RELEASE);
  }
  
-@@ -279,13 +686,36 @@ SweetCPU::startCPU(vm_offset_t start_paddr, vm_offset_t arg_paddr)
+@@ -279,13 +707,36 @@ SweetCPU::startCPU(vm_offset_t start_paddr, vm_offset_t arg_paddr)
  {
  	const ml_topology_cpu_t *cpu = &ml_get_topology_info()->cpus[getCPUNumber()];
  	/* cpu_start() passes NULL,NULL: x20/x21 are set by LowResetVectorBase. */

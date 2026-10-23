@@ -281,6 +281,13 @@ S8Mali::powerUpDomain(void)
 	bool on = waitBitsAt(fPmu, 0, 0xf, 0xf, 10000);
 	IOLog("S8 GPU: G3D domain %s (PMU 0x%x)\n", on ? "on" : "did not come on",
 	    *(volatile uint32_t *)fPmu);
+	if (on) {
+		/* The PLL alone does not set the rate: the APM firmware owns it. */
+		extern "C" int s8_acpm_gpu_khz(uint32_t khz, uint32_t *ans);
+		uint32_t ans = 0;
+		int rc = s8_acpm_gpu_khz(260000, &ans);
+		IOLog("S8 GPU: ACPM g3d 260 MHz rc %d rate %u\n", rc, ans);
+	}
 	return on;
 }
 
@@ -853,7 +860,8 @@ S8MaliUserClient::clientMemoryForType(UInt32 type, IOOptionBits *options,
 	if (mem == NULL) {
 		return kIOReturnBadArgument;
 	}
-	*options = 0;
+	/* Linux maps panfrost BOs write-combined; the client gets the same. */
+	*options = kIOMapWriteCombineCache;
 	*descriptor = mem;
 	return kIOReturnSuccess;
 }

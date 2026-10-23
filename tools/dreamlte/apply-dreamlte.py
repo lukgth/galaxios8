@@ -2669,3 +2669,57 @@ edit('iokit/Kernel/arm/SweetFramebuffer.cpp', [
      '\t}\n'
      '}\n', 1),
 ])
+
+# ---- GPU clock through the ACPM channel of SweetCPU ----
+# The Mali driver powers the G3D domain itself when S-Boot left it off. The
+# rate comes from the same firmware the CPU clusters use (dvfs_g3d, ACPM id
+# 4), so SweetCPU exports one call for it.
+edit('iokit/Kernel/arm/SweetCPU.cpp', [
+    ('#define S8_DVFS_LIT		3       /* dvfs_cpucl1, A53 */\n',
+     '#define S8_DVFS_LIT		3       /* dvfs_cpucl1, A53 */\n'
+     '#define S8_DVFS_G3D		4       /* dvfs_g3d, Mali */\n', 1),
+    ('static int\ns8_acpm_freq(uint32_t id, uint32_t op, uint32_t khz, uint32_t *ans)\n'
+     '{\n'
+     '\tuint32_t cmd[4] = { id, khz, op, 0 };\n'
+     '\tint rc = s8_acpm_send(cmd);\n'
+     '\t*ans = cmd[1];\n'
+     '\treturn rc;\n'
+     '}\n',
+     'static int\ns8_acpm_freq(uint32_t id, uint32_t op, uint32_t khz, uint32_t *ans)\n'
+     '{\n'
+     '\tuint32_t cmd[4] = { id, khz, op, 0 };\n'
+     '\tint rc = s8_acpm_send(cmd);\n'
+     '\t*ans = cmd[1];\n'
+     '\treturn rc;\n'
+     '}\n'
+     '\n'
+     'static bool s8_acpm_up;\n'
+     '\n'
+     '/* Used by S8Mali when it has to power the GPU domain itself. The DVFS\n'
+     ' * thread owns the channel; it sends only when a level changes, and this\n'
+     ' * call happens once, at GPU start. */\n'
+     'extern "C" int\n'
+     's8_acpm_gpu_khz(uint32_t khz, uint32_t *ans)\n'
+     '{\n'
+     '\tuint32_t a = 0;\n'
+     '\tif (!s8_acpm_up) {\n'
+     '\t\treturn -14;\n'
+     '\t}\n'
+     '\tint rc = s8_acpm_freq(S8_DVFS_G3D, S8_FREQ_REQ, khz, &a);\n'
+     '\tif (ans != NULL) {\n'
+     '\t\t*ans = a;\n'
+     '\t}\n'
+     '\treturn rc;\n'
+     '}\n', 1),
+    ('\tif (!s8_acpm_find()) {\n'
+     '\t\tIOLog("S8 DVFS: no ACPM DVFS channel, clocks unchanged\\n");\n'
+     '\t\tthread_terminate(current_thread());\n'
+     '\t\treturn;\n'
+     '\t}\n',
+     '\tif (!s8_acpm_find()) {\n'
+     '\t\tIOLog("S8 DVFS: no ACPM DVFS channel, clocks unchanged\\n");\n'
+     '\t\tthread_terminate(current_thread());\n'
+     '\t\treturn;\n'
+     '\t}\n'
+     '\ts8_acpm_up = true;\n', 1),
+])

@@ -64,3 +64,29 @@ The driver is not yet a user client. Mesa cannot talk to it.
 - Do not report success with llvmpipe, softpipe or any CPU renderer.
 - Measure the GPU temperature before you raise the GPU clock. The GPU TMU is `tmuctrl_2` at `0x10084000`.
 - Keep the G71 errata workarounds from Linux panfrost: TMIX_8463, TMIX_8438 and T76X_3953.
+
+## Known gaps in the driver
+
+Found in the review of 2026-10-24. None of them stops the self test.
+
+1. No interrupts. Completion is polled with 1 microsecond steps, up to 200
+   milliseconds. Mesa sends many small jobs, so the job interrupt (SPI 60)
+   and the MMU interrupt (SPI 61) are needed next. The S8 has no Mali node
+   in the Apple Device Tree, so the node must be added before
+   `registerInterrupt` can be used.
+2. No fences. A submit returns when the job is done, so a client cannot
+   overlap work.
+3. Heap buffer objects do not grow on a GPU page fault. Mesa uses them for
+   the tiler heap. A fault stops the job and resets the GPU today.
+4. Buffer objects are never released when a client closes. The limit is 256
+   per boot and the address space is 4 GiB, so this is bounded, not safe.
+5. The GPU address space is one space for every client.
+6. `GET_PARAM` returns the model id `0x6000` (as Linux does), 1 core group,
+   no AFBC and no JS feature bits. Mesa may take simpler paths because of
+   that, which is acceptable for the first triangle.
+7. The job slot comes from the fragment requirement only: slot 0 for a
+   fragment job, slot 1 for everything else.
+8. Temperatures come from the GPU TMU with the two-point formula of the CPU
+   TMU. The values are logged, not yet enforced.
+9. Cache maintenance flushes every mapped buffer before and after every
+   submit. Correct, but it grows with the number of buffers.
