@@ -120,6 +120,34 @@ drmSyncobjWait(int fd, uint32_t *handles, unsigned num_handles,
 }
 
 int
+drmSyncobjTimelineWait(int fd, uint32_t *handles, uint64_t *points,
+    unsigned num_handles, int64_t timeout_nsec, unsigned flags,
+    uint32_t *first_signaled)
+{
+	(void)fd;
+	(void)handles;
+	(void)points;
+	(void)num_handles;
+	(void)timeout_nsec;
+	(void)flags;
+	(void)first_signaled;
+	return 0;
+}
+
+int
+drmSyncobjTransfer(int fd, uint32_t dst_handle, uint64_t dst_point,
+    uint32_t src_handle, uint64_t src_point, uint32_t flags)
+{
+	(void)fd;
+	(void)dst_handle;
+	(void)dst_point;
+	(void)src_handle;
+	(void)src_point;
+	(void)flags;
+	return 0;
+}
+
+int
 drmSyncobjImportSyncFile(int fd, uint32_t handle, int sync_file_fd)
 {
 	(void)fd;
