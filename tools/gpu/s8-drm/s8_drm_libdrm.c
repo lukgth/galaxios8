@@ -91,9 +91,11 @@ drmSyncobjCreate(int fd, uint32_t flags, uint32_t *handle)
 {
 	(void)fd;
 	(void)flags;
-	(void)handle;
-	errno = ENOSYS;
-	return -1;
+	/* Mesa fails to make a context if this fails, and SUBMIT already waits. */
+	if (handle != NULL) {
+		*handle = 1;
+	}
+	return 0;
 }
 
 int
