@@ -19,14 +19,14 @@
  * recorded in c30b), so every buffer is flushed to the point of coherency
  * before a job runs.
  */
-#if defined(ARM64_BOARD_CONFIG_A5XELTE) && defined(DREAMLTE)
-
 #include <IOKit/IOService.h>
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <IOKit/IOLib.h>
 #include <IOKit/IOTypes.h>
 #include <pexpert/pexpert.h>
 #include <pexpert/arm64/board_config.h>
+
+#if defined(ARM64_BOARD_CONFIG_A5XELTE) && defined(DREAMLTE)
 
 extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 extern "C" void flush_dcache(vm_offset_t addr, unsigned count, int phys);
