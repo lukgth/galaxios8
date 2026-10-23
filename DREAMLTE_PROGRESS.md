@@ -833,3 +833,23 @@ Observations from the logs:
 - The kernel log ring is pulled correctly again: TWRP has no `blockdev`, so
   `pull-sweetlog.sh` now takes the sector count from
   `/sys/class/block/sda24/size` (`2f6e35c`).
+
+### Mali driver 2a on the phone (gpu2, 2026-10-24)
+
+- `s8-gpu2-boot.img` `21b2b7a5...` (CI 40023233445): **the driver loaded and
+  the job ran from XNU**. `logs/sweetlog-gpu2.txt`:
+  - `S8 GPU: block VA 0xfffffff76c140000 PA 0x8831d0000` (2 GiB RAM, so the
+    contiguous block sits in the high bank)
+  - `G3D domain already on (PMU 0xf)`, `PLL_G3D 0xa0a00412 = 260 MHz`
+  - `ID 0x60a00001 (product 0x60a0 r0p0)`, shaders `0x17771777`, `COH 0x0`
+  - `power L2 0x1 ready, shaders 0x17771777 ready, tiler 0x1 ready`
+  - `job 1 done RAWSTAT 0x1 ... data[4] 0xc0ffee11`: the GPU wrote the value
+    through our own page tables with the MMU and caches on.
+- The driver reported failure only because it checked `JS_STATUS`, which
+  reads 0 after the job left the slot. The completion code is word 0 of the
+  job chain (1 = DONE), as the loader recorded in c30b. Fixed in `e958564`;
+  job 2 (the VA window) had not been reached yet.
+- The personality matched four times during boot and ran the test four
+  times. A static "already ran" guard now limits it to one.
+- Not yet re-tested: job 2 through the `0x10000000` VA window and the
+  unmapped-page check.
