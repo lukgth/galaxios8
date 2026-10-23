@@ -119,6 +119,23 @@ jobs:
           ls -la out
           for f in out/*.dylib; do [ -e "$f" ] || continue; file "$f"; done
 
+      - name: Build the OSMesa triangle test
+        shell: bash
+        run: |
+          set -o pipefail
+          if [ -f out/libOSMesa.8.dylib ]; then
+            install_name_tool -id /usr/lib/libOSMesa.8.dylib out/libOSMesa.8.dylib
+            xcrun --sdk iphoneos clang -target arm64-apple-ios16.0 -O2 -Wall \
+              -isysroot "$SDK" -Imesa/include \
+              -o out/s8_gltest tools/gpu/s8-drm/s8_gltest.c \
+              -L out -lOSMesa -Wl,-rpath,/usr/lib
+            codesign -s - -f out/s8_gltest || true
+            otool -L out/s8_gltest
+            file out/s8_gltest
+          else
+            echo "no libOSMesa, skipping the test build"
+          fi
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
