@@ -71,6 +71,9 @@ jobs:
               -c "tools/gpu/s8-drm/$f.c" -o "shim/$f.o"
           done
           xcrun --sdk iphoneos ar rcs shim/libs8drm.a shim/s8_drm.o shim/s8_drm_libdrm.o
+          # Some Mesa targets include <xf86drm.h> without taking dep_libdrm,
+          # so put our header where inc_include already points.
+          cp tools/gpu/s8-drm/xf86drm.h mesa/include/
           cat > shim/libdrm.pc <<EOF
           prefix=$PWD/shim
           exec_prefix=\${prefix}
