@@ -1,0 +1,115 @@
+name: mesa
+
+# Cross-builds Mesa for iOS arm64 on a macOS runner: the OpenGL ES library
+# behind the CoreAnimation bridge (tools/gpu/README.md).
+#
+# First step is softpipe with OSMesa. That proves the toolchain and gives a
+# renderer that needs no GPU, so the EAGL bridge can be tested for
+# correctness. panfrost follows once the S8Mali user client answers from
+# user space.
+#
+# Mesa 25.0.7 is the last release with OSMesa (25.1 removed it).
+
+on:
+  workflow_dispatch:
+    inputs:
+      drivers:
+        description: gallium drivers
+        default: softpipe
+  push:
+    paths:
+      - ".github/workflows/mesa.yml"
+      - "tools/gpu/mesa/**"
+
+concurrency:
+  group: mesa-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MESA_VERSION: "25.0.7"
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deps
+        run: |
+          brew install meson ninja bison flex pkg-config || true
+          meson --version
+          ninja --version
+
+      - name: Fetch Mesa
+        run: |
+          curl -fsSL -o mesa.tar.xz \
+            "https://archive.mesa3d.org/mesa-${MESA_VERSION}.tar.xz"
+          tar xf mesa.tar.xz
+          ln -sf "mesa-${MESA_VERSION}" mesa
+          ls mesa | head
+
+      - name: Cross file
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "SDK=$SDK" >> "$GITHUB_ENV"
+          cat > ios.ini <<EOF
+          [binaries]
+          c = ['xcrun', '--sdk', 'iphoneos', 'clang']
+          cpp = ['xcrun', '--sdk', 'iphoneos', 'clang++']
+          ar = ['xcrun', '--sdk', 'iphoneos', 'ar']
+          strip = ['xcrun', '--sdk', 'iphoneos', 'strip']
+          pkg-config = 'pkg-config'
+          [host_machine]
+          system = 'darwin'
+          cpu_family = 'aarch64'
+          cpu = 'arm64'
+          endian = 'little'
+          [properties]
+          needs_exe_wrapper = true
+          [built-in options]
+          c_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-Wno-error']
+          cpp_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-Wno-error']
+          c_link_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK']
+          cpp_link_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK']
+          EOF
+          cat ios.ini
+
+      - name: Configure
+        run: |
+          cd mesa
+          meson setup build --cross-file ../ios.ini \
+            -Dosmesa=true \
+            -Dgallium-drivers=${{ inputs.drivers || 'softpipe' }} \
+            -Dplatforms= \
+            -Dglx=disabled \
+            -Degl=disabled \
+            -Dgles1=disabled -Dgles2=disabled \
+            -Dllvm=disabled \
+            -Dgbm=disabled \
+            -Dtools= \
+            -Dbuild-tests=false \
+            -Dvalgrind=disabled \
+            -Dshader-cache=disabled \
+            --default-library=shared 2>&1 | tail -40
+
+      - name: Build
+        run: |
+          cd mesa
+          ninja -C build 2>&1 | tail -40
+
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p out
+          find mesa/build -name 'libOSMesa*.dylib' -o -name 'libgallium*.dylib' \
+            -o -name 'libglapi*.dylib' | while read -r f; do cp "$f" out/; done
+          ls -la out
+          for f in out/*.dylib; do [ -e "$f" ] || continue; file "$f"; done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mesa-ios
+          path: out/
+          if-no-files-found: warn
