@@ -18,20 +18,20 @@ Measured on the SM-G950F of this workstation on 2026-10-24. The checkout is `8f4
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| Boot to iOS | Works | `hfs: mounted iOSRoot`, launchd, 397 execs, SpringBoard threads in `logs/sweetlog-s8base1.txt` |
+| Boot to iOS | Works, lock screen visible | `logs/sweetlog-native1.txt`: no SpringBoard crash, 16 swaps, SpringBoard alive at reset; the user confirmed the lock screen |
 | CPUs | 8 of 8 | `A5XELTE CPU: 8/8 CPUs initialized, SGI1 verified` |
 | CPU clocks | A53 1690 MHz, Mongoose 1703 MHz | `S8 DVFS: big 1703000 lit 1690000 kHz` |
 | Thermal | 40 C at start, 44-53 C in 7 minutes | `S8 DVFS: ... C (max ..)` lines |
 | RAM | 2 GiB | `vm_page_bootstrap: 127920 free pages` with 16 KiB pages |
 | Storage | HFS+ root in USERDATA, read and write | `hfs: mounted iOSRoot`, journal initialized |
-| Display | CPU render, 1125x2436 scaled to the panel | `SWEET FB: staged present, stage 1125x2436` |
+| Display | CPU render, native 1440x2960 canvas | `sweetfb_native=1` in the boot line; a 1125x2436 canvas makes SpringBoard abort in `-[_UIScreenComplexBoundingPathUtilities _loadBitmapForScreen:type:]` |
 | Touch | Works | `S8 TOUCH: S6SY761 id ac3761`, tap events |
 | Buttons | Enabled in the build | not pressed in this run |
 | Battery | Real level and voltage | `71% 4226mV external=1 charging=0` |
 | Charging | Not verified | no charge current is set by the kernel yet |
 | RTC | Set by the loader | `s8rtc=...` in the boot arguments |
 | Logs | Loader and kernel text in ramoops and in a ring at the end of USERDATA | `logs/sweetlog-*.txt`, `logs/pmsg-*.txt` |
-| GPU | Driver built, self test not yet run | kernel did not load the class in the first attempt |
+| GPU | Driver loads and runs a job; BO layer and user client built, phone test pending | `S8 GPU: job 1 done RAWSTAT 0x1 ... data[4] 0xc0ffee11` in `logs/sweetlog-gpu2.txt` |
 | Wi-Fi | No driver | hardware identified, `docs/DREAMLTE_WIFI.md` |
 | Bluetooth | No driver | hardware identified, `docs/DREAMLTE_BLUETOOTH.md` |
 | Audio | No driver | hardware identified, `docs/DREAMLTE_AUDIO.md` |
