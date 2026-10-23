@@ -782,3 +782,54 @@ never-compiled `tools/dreamlte/dreamlte_mali.cpp` is left uncommitted.
 3. Zero-copy scanout through the DPU IDMA (needs the SFR update to take effect).
 4. More RAM (512 MiB of 4 GiB), vibration, backlight, Wi-Fi (BCM4361).
 5. Housekeeping: `NOTES.md` and `A5XELTE_PROGRESS.md` moved to `docs/history/` as donor history.
+
+### Baseline reproduced on the SM-G950F (2026-10-23/24)
+
+This is the first boot of this checkout on the SM-G950F of this workstation
+(serial `ce03171365ba20780c`), not the SM-G950N of the earlier records.
+
+- Checkout `9c5171c`. XNU built by CI run 40017536379, kernel SHA-256
+  `a450f6feae5223ac81b9a76b9e4ac67788d3d29e1c8461b153d6723fee493265`.
+- The phone was in TWRP 3.7.0_9-0 with Android data in USERDATA. Device
+  check: `SM-G950F`, `dreamlte`, bootloader `G950FXXUCDVI1`, RAM 3564116 KiB
+  in TWRP. BOOT `sda7` is 41943040 bytes, RECOVERY `sda8` 48234496 bytes,
+  USERDATA `sda24` 58556678144 bytes. TWRP has no `/dev/block/by-name` and
+  no `blockdev`.
+- Backups in `work/`: the BOOT as found (`9c15951d...`, another project's
+  kernel), the stock BOOT of `G950FXXUCDVI1` (`cb62dd61...`), and `sda8`.
+- BOOT `s8-test2-boot.img` `e653cb3a...`: baseline kernel, `rd=ufsroot0
+  ufsroot=USERDATA`, 2 GiB, `cpus=8`, `s8lit=1690000 s8big=1703000`,
+  `sweetfb_native=0 sweetfb_scale=1 sweetfb_hz=60`, `s8autoreset=420`.
+- iOS root: IPSW 16.7.16 (20H392) verified against the documented SHA-256,
+  image `work/ios16-root.img` `b3dbbee9...` (16 GiB, 12 GiB used, case
+  sensitive journaled HFS+, OS + SystemOS + AppOS cryptexes, tweaks from
+  `finish-iosroot.sh`). Written to USERDATA with `flash-chunks.sh`: 512
+  chunks, 374 with data, every chunk read back and verified.
+- Boot 22:42:47, back in TWRP 22:51:03 by `S8 AUTORESET` (420 s). Logs:
+  `logs/sweetlog-s8base1.txt` (ring, 95 KB), `logs/pmsg-s8base1.txt`.
+
+Observations from the logs:
+
+- `8/8 CPUs initialized, SGI1 verified`; DVFS raised the clusters from 1066
+  MHz to `big 1703000 lit 1690000 kHz`; TMU 40 C at start, 44-53 C during
+  the run.
+- `hfs: mounted iOSRoot on device b(1, 0)`, journal initialized; 397 execs
+  (187 `xpcproxy`), SpringBoard with several threads, backboardd swaps at
+  1125x2436 scaled to the panel.
+- S6SY761 touch works (`id ac3761`, enabled after 4 retries).
+- Fuel gauge: `71% 4226mV external=1 charging=0`.
+- `vm_page_bootstrap: 127920 free pages` = 2 GiB, compressor 2048M.
+
+### Mali driver, first kernel attempt (2026-10-24)
+
+- `iokit/Kernel/arm/S8Mali.cpp` added through `apply-dreamlte.py` (source in
+  `xnu/dreamlte/S8Mali.cpp`, `files.arm64` line, KernelConfigTables entry
+  matched on IOResources), `s8gpu=1` gate. CI run 40020703347 built it.
+- Boot `s8-gpu1-boot.img` `04e0c359...`: no driver. The log says
+  `Couldn't alloc class "S8Mali"` four times; the compiled `S8Mali.cpo` in
+  the kernel archive is 808 bytes, an empty object. Cause: the board guard
+  sat above the includes, so `DREAMLTE` was not yet defined. Fixed in
+  `4ec7026` (includes first). Not yet re-tested.
+- The kernel log ring is pulled correctly again: TWRP has no `blockdev`, so
+  `pull-sweetlog.sh` now takes the sector count from
+  `/sys/class/block/sda24/size` (`2f6e35c`).
