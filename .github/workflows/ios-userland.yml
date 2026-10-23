@@ -1,0 +1,61 @@
+name: ios-userland
+
+# Builds the iOS arm64 user space that talks to the S8 kernel drivers on a
+# macOS runner, which has Xcode and the iPhoneOS SDK. Nothing is in the
+# repository as a binary: the artifacts are built here.
+#
+#   s8_test    opens the S8Mali user client and runs a WRITE_VALUE job
+#   libs8drm.a the panfrost libdrm stand-in, for the Mesa build later
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "tools/gpu/**"
+      - ".github/workflows/ios-userland.yml"
+
+concurrency:
+  group: ios-userland-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          set -x
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+          xcrun --sdk iphoneos --show-sdk-version
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "SDK=$SDK" >> "$GITHUB_ENV"
+          clang --version
+
+      - name: Build s8_test
+        run: |
+          mkdir -p out
+          xcrun --sdk iphoneos clang -target arm64-apple-ios16.0 -O2 -Wall \
+            -isysroot "$SDK" \
+            -framework IOKit -framework CoreFoundation \
+            -o out/s8_test tools/gpu/s8-drm/s8_test.c
+          file out/s8_test
+          codesign -s - -f out/s8_test || true
+          otool -L out/s8_test
+
+      - name: Build libs8drm.a
+        run: |
+          xcrun --sdk iphoneos clang -target arm64-apple-ios16.0 -O2 -Wall \
+            -isysroot "$SDK" -Itools/gpu/s8-drm \
+            -c tools/gpu/s8-drm/s8_drm.c -o out/s8_drm.o
+          xcrun --sdk iphoneos ar rcs out/libs8drm.a out/s8_drm.o
+          nm -g out/libs8drm.a | head -20
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-userland
+          path: out/
+          if-no-files-found: error
