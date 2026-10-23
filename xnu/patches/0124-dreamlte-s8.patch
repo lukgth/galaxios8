@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..5b75490
+index 0000000..70d432b
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,1333 @@
+@@ -0,0 +1,1381 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -987,7 +987,7 @@ index 0000000..5b75490
 +#define S8_GPU_VA_END		0x100000000ULL
 +#define S8_GPU_L3_CHUNKS	128
 +#define S8_GPU_L3_PER_CHUNK	16
-+#define S8_GPU_MAX_BOS		64
++#define S8_GPU_MAX_BOS		256
 +
 +struct S8GpuBo {
 +	uint32_t handle;
@@ -1027,7 +1027,7 @@ index 0000000..5b75490
 +	bool asUpdate(uint64_t transtab);
 +	bool buildTables(void);
 +	void writeValueJob(uint32_t off, uint64_t va, uint32_t value);
-+	bool runJob(uint64_t jc, uint32_t *headerWord, uint32_t *rawstat);
++	bool runJob(uint64_t jc, uint32_t *headerWord, uint32_t *rawstat, unsigned slot);
 +	bool selfTest(void);
 +
 +	/* Buffer objects and the 4 GiB GPU address space */
@@ -1135,6 +1135,8 @@ index 0000000..5b75490
 +bool
 +S8Mali::gpuReset(void)
 +{
++	wr(MMU_INT_CLEAR, 0xffffffffu);
++	wr(JOB_INT_CLEAR, 0xffffffffu);
 +	wr(GPU_INT_CLEAR, 0xffffffffu);
 +	wr(GPU_CMD, 1);					/* soft reset */
 +	bool ok = waitBits(GPU_INT_RAWSTAT, 1u << 8, 1u << 8, 10000);
@@ -1195,10 +1197,10 @@ index 0000000..5b75490
 +	wr64(AS0 + AS_MEMATTR_LO, 0x00888d88u);		/* as panfrost */
 +	asCommand(AS_CMD_UPDATE);
 +	if (rd(AS0 + AS_FAULTSTATUS) != 0) {
-+		IOLog("S8 GPU: AS fault 0x%x at 0x%llx (STATUS 0x%x)\n",
-+		    rd(AS0 + AS_FAULTSTATUS), rd64(AS0 + AS_FAULTADDRESS_LO),
++		/* Left over from an earlier fault; the job status decides. */
++		IOLog("S8 GPU: AS fault still 0x%x at 0x%x (STATUS 0x%x)\n",
++		    rd(AS0 + AS_FAULTSTATUS), rd(AS0 + AS_FAULTADDRESS_LO),
 +		    rd(AS0 + AS_STATUS));
-+		return false;
 +	}
 +	return true;
 +}
@@ -1252,21 +1254,25 @@ index 0000000..5b75490
 +/* The job header's first word holds the exception status (1 = DONE), as the
 + * loader logged in c30b; JS_STATUS is 0 again once the job left the slot. */
 +bool
-+S8Mali::runJob(uint64_t jc, uint32_t *headerWord, uint32_t *rawstat)
++S8Mali::runJob(uint64_t jc, uint32_t *headerWord, uint32_t *rawstat, unsigned slot)
 +{
++	/* Slot 0 runs fragment jobs, slot 1 vertex/tiler and compute. panfrost
++	 * picks the slot from the requirements of the submit. */
++	uint32_t js = JS0 + slot * 0x80;
++	uint32_t donebit = (1u << slot) | 0x10000u;	/* done or MMU fault */
 +	flush_dcache((vm_offset_t)fBlockVa, S8_GPU_BLOCK_SIZE, 0);
 +	wr(JOB_INT_CLEAR, 0xffffffffu);
-+	wr(JS0 + JS_HEAD_NEXT_LO, (uint32_t)jc);
-+	wr(JS0 + JS_HEAD_NEXT_HI, (uint32_t)(jc >> 32));
-+	wr(JS0 + JS_AFFINITY_NEXT_LO, rd(SHADER_PRESENT));
-+	wr(JS0 + JS_AFFINITY_NEXT_HI, 0);
-+	wr(JS0 + JS_CONFIG_NEXT, 8u << 16 | 3u << 8 | 3u << 12);
-+	wr(JS0 + JS_COMMAND_NEXT, 1);			/* START */
++	wr(js + JS_HEAD_NEXT_LO, (uint32_t)jc);
++	wr(js + JS_HEAD_NEXT_HI, (uint32_t)(jc >> 32));
++	wr(js + JS_AFFINITY_NEXT_LO, slot == 0 ? rd(SHADER_PRESENT) : rd(TILER_PRESENT));
++	wr(js + JS_AFFINITY_NEXT_HI, 0);
++	wr(js + JS_CONFIG_NEXT, 8u << 16 | 3u << 8 | 3u << 12);
++	wr(js + JS_COMMAND_NEXT, 1);			/* START */
 +	bool done = false;
 +	for (unsigned i = 0; i < 200000; i++) {		/* 200 ms */
 +		uint32_t raw = rd(JOB_INT_RAWSTAT);
-+		if (raw & 0x10001) {
-+			done = true;
++		if (raw & donebit) {
++			done = (raw & (1u << slot)) != 0;
 +			break;
 +		}
 +		IODelay(1);
@@ -1307,7 +1313,7 @@ index 0000000..5b75490
 +	writeValueJob(S8_GPU_JOB + 0x40, S8_GPU_VA_WINDOW + 0x20, 0xc0ffee22u);
 +
 +	uint32_t raw = 0, status = 0;
-+	bool done = runJob(jobPa, (uint32_t *)((uint8_t *)fBlockVa + S8_GPU_JOB), &raw);
++	bool done = runJob(jobPa, (uint32_t *)((uint8_t *)fBlockVa + S8_GPU_JOB), &raw, 0);
 +	status = *(uint32_t *)((uint8_t *)fBlockVa + S8_GPU_JOB);
 +	IOLog("S8 GPU: job 1 %s RAWSTAT 0x%x header status 0x%x data[4] 0x%x\n",
 +	    done ? "done" : "TIMEOUT", raw, status, data[4]);
@@ -1317,7 +1323,7 @@ index 0000000..5b75490
 +	}
 +	data[8] = 0;
 +	flush_dcache((vm_offset_t)fBlockVa, S8_GPU_BLOCK_SIZE, 0);
-+	done = runJob(jobPa + 0x40, (uint32_t *)((uint8_t *)fBlockVa + S8_GPU_JOB + 0x40), &raw);
++	done = runJob(jobPa + 0x40, (uint32_t *)((uint8_t *)fBlockVa + S8_GPU_JOB + 0x40), &raw, 0);
 +	status = *(uint32_t *)((uint8_t *)fBlockVa + S8_GPU_JOB + 0x40);
 +	IOLog("S8 GPU: job 2 %s RAWSTAT 0x%x header status 0x%x data[8] 0x%x witness 0x%x\n",
 +	    done ? "done" : "TIMEOUT", raw, status, data[8], *witness);
@@ -1556,7 +1562,8 @@ index 0000000..5b75490
 +	flush_dcache((vm_offset_t)b->vaCpu, b->size, 0);
 +
 +	uint32_t raw = 0;
-+	bool done = runJob(a->va, (uint32_t *)a->vaCpu, &raw);
++	bool done = runJob(a->va, (uint32_t *)a->vaCpu, &raw, 0);
++	flush_dcache((vm_offset_t)b->vaCpu, b->size, 0);
 +	uint32_t status = *(uint32_t *)a->vaCpu;
 +	uint32_t got = *(volatile uint32_t *)((uint8_t *)b->vaCpu + 0x10);
 +	IOLog("S8 GPU: BO job %s RAWSTAT 0x%x header status 0x%x B[0x10] 0x%x\n",
@@ -1580,7 +1587,7 @@ index 0000000..5b75490
 +		job[12] = 0xbad0bad0u;
 +	}
 +	flush_dcache((vm_offset_t)a->vaCpu, a->size, 0);
-+	done = runJob(a->va, (uint32_t *)a->vaCpu, &raw);
++	done = runJob(a->va, (uint32_t *)a->vaCpu, &raw, 0);
 +	uint32_t mmu = rd(MMU_INT_RAWSTAT);
 +	uint32_t fault = rd(AS0 + AS_FAULTSTATUS);
 +	uint32_t faddr = rd(AS0 + AS_FAULTADDRESS_LO);
@@ -1889,7 +1896,9 @@ index 0000000..5b75490
 +	uint32_t id = rd(GPU_ID);
 +	switch (param) {
 +	case 0:						/* GPU_PROD_ID */
-+		*value = (id >> 16) & 0xffff;
++		/* Linux panfrost reports the model id (0x6000 for G71), not the
++		 * whole product word (this chip: 0x60a0). */
++		*value = (id >> 16) & 0xff00;
 +		return 0;
 +	case 1:						/* JS_FEATURES13 */
 +	case 2:						/* JS_FEATURES14 */
@@ -1923,7 +1932,7 @@ index 0000000..5b75490
 +	IOLockLock(fLock);
 +	S8GpuBo *bo = allocBo(size, flags, handle);
 +	IOReturn ret = kIOReturnNoMemory;
-+	if (bo != NULL && mapBo(bo)) {
++	if (bo != NULL && (!fPowered || mapBo(bo))) {
 +		*offset = bo->va;
 +		ret = kIOReturnSuccess;
 +	} else if (bo != NULL) {
@@ -1968,7 +1977,6 @@ index 0000000..5b75490
 +IOReturn
 +S8Mali::userSubmit(uint64_t jc, uint32_t requirements)
 +{
-+	(void)requirements;
 +	if (fLock == NULL) {
 +		return kIOReturnBadArgument;
 +	}
@@ -1984,13 +1992,31 @@ index 0000000..5b75490
 +			}
 +		}
 +		uint32_t raw = 0;
-+		bool done = runJob(jc, (uint32_t *)cpu, &raw);
++		unsigned slot = (requirements & 1u) ? 0 : 1;	/* PANFROST_JD_REQ_FS */
++		bool done = runJob(jc, (uint32_t *)cpu, &raw, slot);
++		for (unsigned i = 0; i < S8_GPU_MAX_BOS; i++) {
++			if (fBos[i] != NULL) {
++				flush_dcache((vm_offset_t)fBos[i]->vaCpu,
++				    (unsigned)fBos[i]->size, 0);
++			}
++		}
 +		uint32_t status = *(volatile uint32_t *)cpu;
 +		if (done && status == 1) {
 +			ret = kIOReturnSuccess;
 +		} else {
-+			IOLog("S8 GPU: submit status 0x%x RAWSTAT 0x%x (job 0x%llx)\n",
-+			    status, raw, jc);
++			IOLog("S8 GPU: submit status 0x%x RAWSTAT 0x%x fault 0x%x at 0x%x "
++			    "(job 0x%llx)\n", status, raw, rd(AS0 + AS_FAULTSTATUS),
++			    rd(AS0 + AS_FAULTADDRESS_LO), jc);
++			/* A fault leaves the slot and the MMU stopped: start again so
++			 * the next submit has a working GPU. Buffers stay mapped. */
++			if (gpuReset() && gpuPowerUp()) {
++				asUpdate(fTablesPhys | LPAE_TRANSTAB);
++				for (unsigned i = 0; i < S8_GPU_MAX_BOS; i++) {
++					if (fBos[i] != NULL) {
++						mapBo(fBos[i]);
++					}
++				}
++			}
 +			ret = kIOReturnTimeout;
 +		}
 +	}
@@ -2033,6 +2059,26 @@ index 0000000..5b75490
 +	}
 +	bo->mem->retain();
 +	return bo->mem;
++}
++
++/* The GPU has its own TMU (tmuctrl_2 at 0x10084000). Sensor 0: code in
++ * CURRENT_TEMP at 0x40, trim at 0, two-point 25/85 C, as the CPU TMU. */
++static int
++s8_gpu_temp(void)
++{
++	volatile uint8_t *tmu = (volatile uint8_t *)ml_io_map(0x10084000, 0x1000);
++	if (tmu == NULL) {
++		return 0;
++	}
++	uint32_t two_point = (*(volatile uint32_t *)tmu >> 23) & 1;
++	uint32_t trim = *(volatile uint32_t *)(tmu + 0);
++	int e1 = (int)(trim & 0x1ff), e2 = (int)((trim >> 9) & 0x1ff);
++	int code = (int)((*(volatile uint32_t *)(tmu + 0x40)) & 0x1ff);
++	if (e1 == 0 || (two_point && e2 <= e1)) {
++		return 0;
++	}
++	int t = two_point ? (code - e1) * (85 - 25) / (e2 - e1) + 25 : code - e1 + 25;
++	return (t < 5 || t > 125) ? 0 : t;
 +}
 +
 +/* Exercise the calls the user client exposes, without a user process:
@@ -2138,7 +2184,9 @@ index 0000000..5b75490
 +	uint32_t mhz = p ? (uint32_t)((26ULL * m / p) >> s) : 0;
 +	IOLog("S8 GPU: PLL_G3D 0x%x = %u MHz (ACPM owns the rate)\n", pll, mhz);
 +
++	IOLog("S8 GPU: TMU %d C before the test\n", s8_gpu_temp());
 +	bool ok = selfTest();
++	IOLog("S8 GPU: TMU %d C after the test\n", s8_gpu_temp());
 +	if (ok) {
 +		IOLog("S8 GPU: milestone 2a passed: a WRITE_VALUE job ran from XNU\n");
 +	}
