@@ -956,6 +956,18 @@ S8MaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *a
 		}
 		break;
 	}
+	case 0x40: {					/* S8_LOG: a line into the ring */
+		char text[241];
+		IOByteCount n = inSize < sizeof(text) - 1 ? inSize : sizeof(text) - 1;
+		if (in == NULL || n == 0) {
+			break;
+		}
+		bcopy(in, text, n);
+		text[n] = 0;
+		IOLog("S8 USER: %s\n", text);
+		ret = kIOReturnSuccess;
+		break;
+	}
 	case 0x08: {					/* MADVISE */
 		if (inSize < sizeof(s8_pf_madvise) || out == NULL ||
 		    outSize < sizeof(s8_pf_madvise)) {

@@ -66,6 +66,10 @@ enum {
 static FILE *out;
 static io_connect_t conn;
 
+/* S8Mali selector 0x40 puts a line into the kernel log ring, which is the
+ * only place readable from TWRP without pulling the whole root. */
+#define PF_LOG 0x40
+
 static void
 say(const char *fmt, ...)
 {
@@ -81,6 +85,13 @@ say(const char *fmt, ...)
 		fflush(out);
 	}
 	fflush(stdout);
+	if (conn != 0) {
+		char line[240];
+		va_start(ap, fmt);
+		vsnprintf(line, sizeof(line), fmt, ap);
+		va_end(ap);
+		IOConnectCallStructMethod(conn, PF_LOG, line, strlen(line), NULL, NULL);
+	}
 }
 
 static int

@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..5b1ba0c
+index 0000000..9fc11fd
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,1405 @@
+@@ -0,0 +1,1417 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -1802,6 +1802,18 @@ index 0000000..5b1ba0c
 +		if (ret == kIOReturnSuccess) {
 +			bcopy(&s, out, sizeof(s));
 +		}
++		break;
++	}
++	case 0x40: {					/* S8_LOG: a line into the ring */
++		char text[241];
++		IOByteCount n = inSize < sizeof(text) - 1 ? inSize : sizeof(text) - 1;
++		if (in == NULL || n == 0) {
++			break;
++		}
++		bcopy(in, text, n);
++		text[n] = 0;
++		IOLog("S8 USER: %s\n", text);
++		ret = kIOReturnSuccess;
 +		break;
 +	}
 +	case 0x08: {					/* MADVISE */

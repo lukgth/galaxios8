@@ -12,9 +12,31 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
+
+#include <IOKit/IOKitLib.h>
 
 #include <GL/osmesa.h>
 #include <GL/gl.h>
+
+static io_connect_t gpu;
+
+/* A line into the kernel log ring (S8Mali selector 0x40), readable in TWRP. */
+static void
+ring(const char *fmt, ...)
+{
+	char line[240];
+	va_list ap;
+
+	va_start(ap, fmt);
+	vsnprintf(line, sizeof(line), fmt, ap);
+	va_end(ap);
+	printf("%s\n", line);
+	fflush(stdout);
+	if (gpu != 0) {
+		IOConnectCallStructMethod(gpu, 0x40, line, strlen(line), NULL, NULL);
+	}
+}
 
 #define W 256
 #define H 256
@@ -44,23 +66,30 @@ main(void)
 	const char *ver, *rend;
 	unsigned sum = 0;
 
+	{
+		io_service_t service = IOServiceGetMatchingService(kIOMainPortDefault,
+		    IOServiceMatching("S8Mali"));
+		if (service != 0) {
+			IOServiceOpen(service, mach_task_self(), 0, &gpu);
+		}
+	}
 	buf = calloc(1, (size_t)W * H * 4);
 	if (buf == NULL) {
 		return 1;
 	}
 	ctx = OSMesaCreateContextExt(OSMESA_RGBA, 24, 0, 0, NULL);
 	if (ctx == NULL) {
-		printf("s8_gltest: OSMesaCreateContextExt failed\n");
+		ring("s8_gltest: OSMesaCreateContextExt failed");
 		return 1;
 	}
 	if (!OSMesaMakeCurrent(ctx, buf, GL_UNSIGNED_BYTE, W, H)) {
-		printf("s8_gltest: OSMesaMakeCurrent failed\n");
+		ring("s8_gltest: OSMesaMakeCurrent failed");
 		return 1;
 	}
 	ver = (const char *)glGetString(GL_VERSION);
 	rend = (const char *)glGetString(GL_RENDERER);
-	printf("s8_gltest: GL_VERSION %s\n", ver != NULL ? ver : "(null)");
-	printf("s8_gltest: GL_RENDERER %s\n", rend != NULL ? rend : "(null)");
+	ring("s8_gltest: GL_VERSION %s", ver != NULL ? ver : "(null)");
+	ring("s8_gltest: GL_RENDERER %s", rend != NULL ? rend : "(null)");
 
 	glViewport(0, 0, W, H);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -78,15 +107,15 @@ main(void)
 	for (size_t i = 0; i < (size_t)W * H * 4; i++) {
 		sum = sum * 31u + buf[i];
 	}
-	printf("s8_gltest: checksum 0x%08x\n", sum);
+	ring("s8_gltest: checksum 0x%08x", sum);
 	/* The centre of the triangle must not be black. */
 	{
 		unsigned char *c = buf + ((H / 2) * W + W / 2) * 4;
-		printf("s8_gltest: centre BGRA %u %u %u %u\n", c[0], c[1], c[2], c[3]);
+		ring("s8_gltest: centre BGRA %u %u %u %u", c[0], c[1], c[2], c[3]);
 	}
 	save_ppm("/var/log/s8-gltest.ppm", buf);
 	OSMesaDestroyContext(ctx);
 	free(buf);
-	printf("s8_gltest: done\n");
+	ring("s8_gltest: done");
 	return 0;
 }

@@ -128,7 +128,8 @@ jobs:
             xcrun --sdk iphoneos clang -target arm64-apple-ios16.0 -O2 -Wall \
               -isysroot "$SDK" -Imesa/include \
               -o out/s8_gltest tools/gpu/s8-drm/s8_gltest.c \
-              -L out -lOSMesa -Wl,-rpath,/usr/lib
+              -L out -lOSMesa -Wl,-rpath,/usr/lib \
+              -framework IOKit -framework CoreFoundation
             codesign -s - -f out/s8_gltest || true
             otool -L out/s8_gltest
             file out/s8_gltest
