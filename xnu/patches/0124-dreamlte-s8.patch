@@ -842,7 +842,7 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..63f8e85
+index 0000000..5b1ba0c
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
 @@ -0,0 +1,1405 @@
@@ -882,6 +882,7 @@ index 0000000..63f8e85
 +#if defined(ARM64_BOARD_CONFIG_A5XELTE) && defined(DREAMLTE)
 +
 +extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++extern "C" int s8_acpm_gpu_khz(uint32_t khz, uint32_t *ans);	/* SweetCPU.cpp */
 +extern "C" void flush_dcache(vm_offset_t addr, unsigned count, int phys);
 +
 +#define S8_MALI_BASE		0x13900000
@@ -1131,7 +1132,6 @@ index 0000000..63f8e85
 +	    *(volatile uint32_t *)fPmu);
 +	if (on) {
 +		/* The PLL alone does not set the rate: the APM firmware owns it. */
-+		extern "C" int s8_acpm_gpu_khz(uint32_t khz, uint32_t *ans);
 +		uint32_t ans = 0;
 +		int rc = s8_acpm_gpu_khz(260000, &ans);
 +		IOLog("S8 GPU: ACPM g3d 260 MHz rc %d rate %u\n", rc, ans);

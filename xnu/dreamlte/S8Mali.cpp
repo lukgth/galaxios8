@@ -34,6 +34,7 @@
 #if defined(ARM64_BOARD_CONFIG_A5XELTE) && defined(DREAMLTE)
 
 extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+extern "C" int s8_acpm_gpu_khz(uint32_t khz, uint32_t *ans);	/* SweetCPU.cpp */
 extern "C" void flush_dcache(vm_offset_t addr, unsigned count, int phys);
 
 #define S8_MALI_BASE		0x13900000
@@ -283,7 +284,6 @@ S8Mali::powerUpDomain(void)
 	    *(volatile uint32_t *)fPmu);
 	if (on) {
 		/* The PLL alone does not set the rate: the APM firmware owns it. */
-		extern "C" int s8_acpm_gpu_khz(uint32_t khz, uint32_t *ans);
 		uint32_t ans = 0;
 		int rc = s8_acpm_gpu_khz(260000, &ans);
 		IOLog("S8 GPU: ACPM g3d 260 MHz rc %d rate %u\n", rc, ans);
