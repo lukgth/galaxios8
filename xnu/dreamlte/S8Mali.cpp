@@ -956,7 +956,7 @@ S8MaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *a
 		}
 		break;
 	}
-	case 0x40: {					/* S8_LOG: a line into the ring */
+	case 0x80: {					/* S8_LOG: a line into the ring */
 		char text[241];
 		IOByteCount n = inSize < sizeof(text) - 1 ? inSize : sizeof(text) - 1;
 		if (in == NULL || n == 0) {

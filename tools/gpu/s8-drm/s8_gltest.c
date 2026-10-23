@@ -21,7 +21,7 @@
 
 static io_connect_t gpu;
 
-/* A line into the kernel log ring (S8Mali selector 0x40), readable in TWRP. */
+/* A line into the kernel log ring (S8Mali selector 0x80), readable in TWRP. */
 static void
 ring(const char *fmt, ...)
 {
@@ -34,7 +34,7 @@ ring(const char *fmt, ...)
 	printf("%s\n", line);
 	fflush(stdout);
 	if (gpu != 0) {
-		IOConnectCallStructMethod(gpu, 0x40, line, strlen(line), NULL, NULL);
+		IOConnectCallStructMethod(gpu, 0x80, line, strlen(line), NULL, NULL);
 	}
 }
 

@@ -66,9 +66,9 @@ enum {
 static FILE *out;
 static io_connect_t conn;
 
-/* S8Mali selector 0x40 puts a line into the kernel log ring, which is the
+/* S8Mali selector 0x80 puts a line into the kernel log ring, which is the
  * only place readable from TWRP without pulling the whole root. */
-#define PF_LOG 0x40
+#define PF_LOG 0x80
 
 static void
 say(const char *fmt, ...)

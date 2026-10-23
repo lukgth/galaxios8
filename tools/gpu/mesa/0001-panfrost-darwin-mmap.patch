@@ -1,0 +1,26 @@
+--- a/src/panfrost/lib/kmod/pan_kmod.h
++++ b/src/panfrost/lib/kmod/pan_kmod.h
+@@ -17,6 +17,10 @@
+ 
+ #pragma once
+ 
++#if defined(__APPLE__)
++#include <s8_drm.h>   /* the S8Mali user client stands in for DRM on iOS */
++#endif
++
+ #include <fcntl.h>
+ #include <unistd.h>
+ #include <xf86drm.h>
+@@ -615,8 +619,12 @@
+    if (mmap_offset < 0)
+       return MAP_FAILED;
+ 
++#if defined(__APPLE__)
++   host_addr = s8_drm_map(bo->dev->fd, (uint64_t)(mmap_offset + bo_offset), size);
++#else
+    host_addr = os_mmap(host_addr, size, prot, flags, bo->dev->fd,
+                        mmap_offset + bo_offset);
++#endif
+    if (host_addr == MAP_FAILED) {
+       mesa_loge("mmap(..., size=%zu, prot=%d, flags=0x%x) failed: %s",
+                 size, prot, flags, strerror(errno));

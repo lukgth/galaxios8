@@ -52,6 +52,38 @@ jobs:
           ln -sf "mesa-${MESA_VERSION}" mesa
           ls mesa | head
 
+      - name: Patch Mesa for Darwin
+        run: |
+          cd mesa
+          for p in ../tools/gpu/mesa/*.patch; do
+            echo "applying $p"
+            patch -p1 --forward < "$p"
+          done
+
+      - name: libdrm stand-in
+        run: |
+          set -euo pipefail
+          mkdir -p shim
+          for f in s8_drm s8_drm_libdrm; do
+            xcrun --sdk iphoneos clang -target arm64-apple-ios16.0 -O2 -Wall \
+              -isysroot "$SDK" -Itools/gpu/s8-drm \
+              -c "tools/gpu/s8-drm/$f.c" -o "shim/$f.o"
+          done
+          xcrun --sdk iphoneos ar rcs shim/libs8drm.a shim/s8_drm.o shim/s8_drm_libdrm.o
+          cat > shim/libdrm.pc <<EOF
+          prefix=$PWD/shim
+          exec_prefix=\${prefix}
+          libdir=\${prefix}
+          includedir=$PWD/tools/gpu/s8-drm
+          Name: libdrm
+          Description: S8Mali user client, libdrm names
+          Version: 2.4.120
+          Libs: -L\${libdir} -ls8drm
+          Cflags: -I\${includedir}
+          EOF
+          echo "PKG_CONFIG_PATH=$PWD/shim" >> "$GITHUB_ENV"
+          cat shim/libdrm.pc
+
       - name: Cross file
         run: |
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)

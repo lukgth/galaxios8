@@ -842,7 +842,7 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..9fc11fd
+index 0000000..13df5f0
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
 @@ -0,0 +1,1417 @@
@@ -1804,7 +1804,7 @@ index 0000000..9fc11fd
 +		}
 +		break;
 +	}
-+	case 0x40: {					/* S8_LOG: a line into the ring */
++	case 0x80: {					/* S8_LOG: a line into the ring */
 +		char text[241];
 +		IOByteCount n = inSize < sizeof(text) - 1 ? inSize : sizeof(text) - 1;
 +		if (in == NULL || n == 0) {
