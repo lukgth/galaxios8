@@ -9,7 +9,10 @@ name=${1:?name, e.g. boot32}
 export ANDROID_SERIAL
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 mkdir -p "$repo/logs"
-adb shell 'b=$(blockdev --getsize64 /dev/block/sda24); dd if=/dev/block/sda24 of=/tmp/slog.bin bs=4096 skip=$((b/4096-1025)) count=1025 2>/dev/null'
+# TWRP 3.7 has no blockdev: take the size from sysfs (512-byte sectors).
+sb=$(adb shell 'cat /sys/class/block/sda24/size' | tr -d '\r')
+skip=$(( sb * 512 / 4096 - 1025 ))
+adb shell "dd if=/dev/block/sda24 of=/tmp/slog.bin bs=4096 skip=$skip count=1025 2>/dev/null"
 adb pull /tmp/slog.bin "$repo/logs/sweetlog-$name.bin" >/dev/null
 # pmsg survives a warm reboot only; after a forced power cycle pstore is empty.
 adb pull /sys/fs/pstore/pmsg-ramoops-0 "$repo/logs/pmsg-$name.txt" >/dev/null ||
