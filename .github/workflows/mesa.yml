@@ -63,6 +63,7 @@ jobs:
       - name: libdrm stand-in
         run: |
           set -euo pipefail
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           mkdir -p shim
           for f in s8_drm s8_drm_libdrm; do
             xcrun --sdk iphoneos clang -target arm64-apple-ios16.0 -O2 -Wall \
