@@ -22,6 +22,10 @@
 #include <IOKit/IOService.h>
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <IOKit/IOLib.h>
+#include <IOKit/IOKitKeys.h>
+#include <IOKit/IOUserClient.h>
+#include <IOKit/IOLocks.h>
+#include <kern/clock.h>
 #include <IOKit/IOTypes.h>
 #include <libkern/libkern.h>
 #include <pexpert/pexpert.h>
@@ -197,6 +201,27 @@ private:
 	bool mapBo(S8GpuBo *bo);
 	void freeBo(S8GpuBo *bo);
 	bool boTest(void);
+
+public:
+	/* User client API (panfrost UAPI numbers) */
+	int userGetParam(uint32_t param, uint64_t *value);
+	IOReturn userCreateBo(uint32_t size, uint32_t flags, uint32_t *handle, uint64_t *offset);
+	IOReturn userFreeBo(uint32_t handle);
+	IOReturn userMmapBo(uint32_t handle, uint64_t *offset);
+	IOReturn userGetBoOffset(uint32_t handle, uint64_t *offset);
+	IOReturn userSubmit(uint64_t jc, uint32_t requirements);
+	IOReturn userWaitBo(uint32_t handle, int64_t timeout_ns);
+	IOReturn userMadvise(uint32_t handle, uint32_t madv, uint32_t *retained);
+	IOMemoryDescriptor *userBoMemory(vm_offset_t type);
+	bool userOpen(void);
+	void userClose(void);
+
+private:
+	IOLock *fLock;
+	bool fPowered;
+	bool gpuAcquire(void);
+	void gpuRelease(void);
+	uint64_t vaToCpu(uint64_t va, uint64_t *size);
 };
 
 OSDefineMetaClassAndStructors(S8Mali, IOService);
@@ -718,6 +743,444 @@ S8Mali::boTest(void)
 	return fault != 0;
 }
 
+/* ---- user client: the panfrost UAPI (milestone 2b, 2/2) ---- */
+
+/* Layouts of include/uapi/drm/panfrost_drm.h, Mesa 25.0.7 */
+struct s8_pf_create_bo {
+	uint32_t size;
+	uint32_t flags;
+	uint32_t handle;
+	uint32_t pad;
+	uint64_t offset;
+};
+struct s8_pf_mmap_bo {
+	uint32_t handle;
+	uint32_t flags;
+	uint64_t offset;
+};
+struct s8_pf_get_param {
+	uint32_t param;
+	uint32_t pad;
+	uint64_t value;
+};
+struct s8_pf_get_bo_offset {
+	uint32_t handle;
+	uint32_t pad;
+	uint64_t offset;
+};
+struct s8_pf_submit {
+	uint64_t jc;
+	uint64_t in_syncs;
+	uint32_t in_sync_count;
+	uint32_t out_sync;
+	uint64_t bo_handles;
+	uint32_t bo_handle_count;
+	uint32_t requirements;
+};
+struct s8_pf_wait_bo {
+	uint32_t handle;
+	uint32_t pad;
+	int64_t timeout_ns;
+};
+struct s8_pf_madvise {
+	uint32_t handle;
+	uint32_t madv;
+	uint32_t retained;
+};
+
+class S8MaliUserClient : public IOUserClient {
+	OSDeclareDefaultStructors(S8MaliUserClient);
+public:
+	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+	void stop(IOService *provider) APPLE_KEXT_OVERRIDE;
+	IOReturn externalMethod(uint32_t selector, IOExternalMethodArguments *args,
+	    IOExternalMethodDispatch *dispatch, OSObject *target,
+	    void *reference) APPLE_KEXT_OVERRIDE;
+	IOReturn clientMemoryForType(UInt32 type, IOOptionBits *options,
+	    IOMemoryDescriptor **descriptor) APPLE_KEXT_OVERRIDE;
+private:
+	S8Mali *fGpu;
+};
+OSDefineMetaClassAndStructors(S8MaliUserClient, IOUserClient);
+
+bool
+S8MaliUserClient::start(IOService *provider)
+{
+	if (!IOUserClient::start(provider)) {
+		return false;
+	}
+	fGpu = OSDynamicCast(S8Mali, provider);
+	if (fGpu == NULL) {
+		return false;
+	}
+	if (!fGpu->userOpen()) {
+		return false;
+	}
+	IOLog("S8 GPU: user client opened\n");
+	return true;
+}
+
+void
+S8MaliUserClient::stop(IOService *provider)
+{
+	if (fGpu != NULL) {
+		fGpu->userClose();
+	}
+	IOUserClient::stop(provider);
+}
+
+IOReturn
+S8MaliUserClient::clientMemoryForType(UInt32 type, IOOptionBits *options,
+    IOMemoryDescriptor **descriptor)
+{
+	if (fGpu == NULL || descriptor == NULL) {
+		return kIOReturnBadArgument;
+	}
+	IOMemoryDescriptor *mem = fGpu->userBoMemory(type);
+	if (mem == NULL) {
+		return kIOReturnBadArgument;
+	}
+	*options = 0;
+	*descriptor = mem;
+	return kIOReturnSuccess;
+}
+
+IOReturn
+S8MaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *args,
+    IOExternalMethodDispatch *dispatch __unused, OSObject *target __unused,
+    void *reference __unused)
+{
+	if (args == NULL || fGpu == NULL) {
+		return kIOReturnBadArgument;
+	}
+	void *in = (void *)args->structureInput;
+	void *out = (void *)args->structureOutput;
+	IOByteCount inSize = args->structureInputSize;
+	IOByteCount outSize = args->structureOutputSize;
+	IOReturn ret = kIOReturnBadArgument;
+
+	switch (selector) {
+	case 0x00: {					/* SUBMIT */
+		if (inSize < sizeof(s8_pf_submit)) {
+			break;
+		}
+		s8_pf_submit s;
+		if (out != NULL && outSize >= sizeof(s)) {
+			memcpy(&s, out, sizeof(s));	/* the shim may pass it in either */
+		} else {
+			memcpy(&s, in, sizeof(s));
+		}
+		ret = fGpu->userSubmit(s.jc, s.requirements);
+		break;
+	}
+	case 0x01: {					/* WAIT_BO */
+		if (inSize < sizeof(s8_pf_wait_bo)) {
+			break;
+		}
+		s8_pf_wait_bo s;
+		memcpy(&s, in, sizeof(s));
+		ret = fGpu->userWaitBo(s.handle, s.timeout_ns);
+		break;
+	}
+	case 0x02: {					/* CREATE_BO */
+		if (inSize < sizeof(s8_pf_create_bo) || out == NULL ||
+		    outSize < sizeof(s8_pf_create_bo)) {
+			break;
+		}
+		s8_pf_create_bo s;
+		memcpy(&s, in, sizeof(s));
+		ret = fGpu->userCreateBo(s.size, s.flags, &s.handle, &s.offset);
+		if (ret == kIOReturnSuccess) {
+			memcpy(out, &s, sizeof(s));
+		}
+		break;
+	}
+	case 0x03: {					/* MMAP_BO */
+		if (inSize < sizeof(s8_pf_mmap_bo) || out == NULL ||
+		    outSize < sizeof(s8_pf_mmap_bo)) {
+			break;
+		}
+		s8_pf_mmap_bo s;
+		memcpy(&s, in, sizeof(s));
+		ret = fGpu->userMmapBo(s.handle, &s.offset);
+		if (ret == kIOReturnSuccess) {
+			memcpy(out, &s, sizeof(s));
+		}
+		break;
+	}
+	case 0x04: {					/* GET_PARAM */
+		if (inSize < sizeof(s8_pf_get_param) || out == NULL ||
+		    outSize < sizeof(s8_pf_get_param)) {
+			break;
+		}
+		s8_pf_get_param s;
+		memcpy(&s, in, sizeof(s));
+		ret = fGpu->userGetParam(s.param, &s.value) == 0 ?
+		    kIOReturnSuccess : kIOReturnBadArgument;
+		if (ret == kIOReturnSuccess) {
+			memcpy(out, &s, sizeof(s));
+		}
+		break;
+	}
+	case 0x05: {					/* GET_BO_OFFSET */
+		if (inSize < sizeof(s8_pf_get_bo_offset) || out == NULL ||
+		    outSize < sizeof(s8_pf_get_bo_offset)) {
+			break;
+		}
+		s8_pf_get_bo_offset s;
+		memcpy(&s, in, sizeof(s));
+		ret = fGpu->userGetBoOffset(s.handle, &s.offset);
+		if (ret == kIOReturnSuccess) {
+			memcpy(out, &s, sizeof(s));
+		}
+		break;
+	}
+	case 0x08: {					/* MADVISE */
+		if (inSize < sizeof(s8_pf_madvise) || out == NULL ||
+		    outSize < sizeof(s8_pf_madvise)) {
+			break;
+		}
+		s8_pf_madvise s;
+		memcpy(&s, in, sizeof(s));
+		ret = fGpu->userMadvise(s.handle, s.madv, &s.retained);
+		if (ret == kIOReturnSuccess) {
+			memcpy(out, &s, sizeof(s));
+		}
+		break;
+	}
+	default:
+		ret = kIOReturnUnsupported;
+		break;
+	}
+	return ret;
+}
+
+uint64_t
+S8Mali::vaToCpu(uint64_t va, uint64_t *size)
+{
+	for (unsigned i = 0; i < S8_GPU_MAX_BOS; i++) {
+		S8GpuBo *bo = fBos[i];
+		if (bo != NULL && va >= bo->va && va < bo->va + bo->size) {
+			if (size != NULL) {
+				*size = bo->size - (va - bo->va);
+			}
+			return (uint64_t)((uint8_t *)bo->vaCpu + (va - bo->va));
+		}
+	}
+	return 0;
+}
+
+bool
+S8Mali::gpuAcquire(void)
+{
+	if (fPowered) {
+		return true;
+	}
+	if (!powerUpDomain() || !gpuReset() || !gpuPowerUp()) {
+		return false;
+	}
+	if (fTables == NULL && !tablesInit()) {
+		return false;
+	}
+	if (!asUpdate(fTablesPhys | LPAE_TRANSTAB)) {
+		return false;
+	}
+	for (unsigned i = 0; i < S8_GPU_MAX_BOS; i++) {
+		if (fBos[i] != NULL && !mapBo(fBos[i])) {
+			return false;
+		}
+	}
+	fPowered = true;
+	return true;
+}
+
+void
+S8Mali::gpuRelease(void)
+{
+	if (fPowered) {
+		gpuPowerDown();
+		fPowered = false;
+	}
+}
+
+bool
+S8Mali::userOpen(void)
+{
+	if (fLock == NULL) {
+		fLock = IOLockAlloc();
+	}
+	if (fLock == NULL) {
+		return false;
+	}
+	IOLockLock(fLock);
+	bool ok = gpuAcquire();
+	IOLockUnlock(fLock);
+	return ok;
+}
+
+void
+S8Mali::userClose(void)
+{
+	if (fLock == NULL) {
+		return;
+	}
+	IOLockLock(fLock);
+	gpuRelease();
+	IOLockUnlock(fLock);
+}
+
+int
+S8Mali::userGetParam(uint32_t param, uint64_t *value)
+{
+	uint32_t id = rd(GPU_ID);
+	switch (param) {
+	case 0:						/* GPU_PROD_ID */
+		*value = (id >> 16) & 0xffff;
+		return 0;
+	case 1:						/* JS_FEATURES13 */
+	case 2:						/* JS_FEATURES14 */
+	case 3:						/* JS_FEATURES15 */
+		*value = 0;
+		return 0;
+	case 4:						/* NR_CORE_GROUPS */
+		*value = 1;
+		return 0;
+	case 5:						/* THREAD_TLS_ALLOC */
+	case 6:						/* AFBC_FEATURES */
+		*value = 0;
+		return 0;
+	case 7:						/* SYSTEM_TIMESTAMP */
+		*value = mach_absolute_time();
+		return 0;
+	case 8:						/* SYSTEM_TIMESTAMP_FREQUENCY */
+		*value = 0;
+		return 0;
+	default:
+		return -22;
+	}
+}
+
+IOReturn
+S8Mali::userCreateBo(uint32_t size, uint32_t flags, uint32_t *handle, uint64_t *offset)
+{
+	if (fLock == NULL || size == 0) {
+		return kIOReturnBadArgument;
+	}
+	IOLockLock(fLock);
+	S8GpuBo *bo = allocBo(size, flags, handle);
+	IOReturn ret = kIOReturnNoMemory;
+	if (bo != NULL && mapBo(bo)) {
+		*offset = bo->va;
+		ret = kIOReturnSuccess;
+	} else if (bo != NULL) {
+		freeBo(bo);
+	}
+	IOLockUnlock(fLock);
+	return ret;
+}
+
+IOReturn
+S8Mali::userFreeBo(uint32_t handle)
+{
+	if (fLock == NULL) {
+		return kIOReturnBadArgument;
+	}
+	IOLockLock(fLock);
+	S8GpuBo *bo = findBo(handle);
+	if (bo != NULL) {
+		freeBo(bo);
+	}
+	IOLockUnlock(fLock);
+	return bo != NULL ? kIOReturnSuccess : kIOReturnBadArgument;
+}
+
+IOReturn
+S8Mali::userMmapBo(uint32_t handle, uint64_t *offset)
+{
+	S8GpuBo *bo = findBo(handle);
+	if (bo == NULL) {
+		return kIOReturnBadArgument;
+	}
+	*offset = bo->va;
+	return kIOReturnSuccess;
+}
+
+IOReturn
+S8Mali::userGetBoOffset(uint32_t handle, uint64_t *offset)
+{
+	return userMmapBo(handle, offset);
+}
+
+IOReturn
+S8Mali::userSubmit(uint64_t jc, uint32_t requirements)
+{
+	(void)requirements;
+	if (fLock == NULL) {
+		return kIOReturnBadArgument;
+	}
+	IOLockLock(fLock);
+	IOReturn ret = kIOReturnBadArgument;
+	uint64_t size = 0;
+	uint64_t cpu = vaToCpu(jc, &size);
+	if (cpu != 0 && gpuAcquire()) {
+		for (unsigned i = 0; i < S8_GPU_MAX_BOS; i++) {
+			if (fBos[i] != NULL) {
+				flush_dcache((vm_offset_t)fBos[i]->vaCpu,
+				    (unsigned)fBos[i]->size, 0);
+			}
+		}
+		uint32_t raw = 0;
+		bool done = runJob(jc, (uint32_t *)cpu, &raw);
+		uint32_t status = *(volatile uint32_t *)cpu;
+		if (done && status == 1) {
+			ret = kIOReturnSuccess;
+		} else {
+			IOLog("S8 GPU: submit status 0x%x RAWSTAT 0x%x (job 0x%llx)\n",
+			    status, raw, jc);
+			ret = kIOReturnTimeout;
+		}
+	}
+	IOLockUnlock(fLock);
+	return ret;
+}
+
+IOReturn
+S8Mali::userWaitBo(uint32_t handle, int64_t timeout_ns)
+{
+	(void)timeout_ns;
+	return findBo(handle) != NULL ? kIOReturnSuccess : kIOReturnBadArgument;
+}
+
+IOReturn
+S8Mali::userMadvise(uint32_t handle, uint32_t madv, uint32_t *retained)
+{
+	(void)madv;
+	if (findBo(handle) == NULL) {
+		return kIOReturnBadArgument;
+	}
+	*retained = 1;					/* pages are wired and kept */
+	return kIOReturnSuccess;
+}
+
+IOMemoryDescriptor *
+S8Mali::userBoMemory(vm_offset_t type)
+{
+	S8GpuBo *bo = findBo((uint32_t)type);
+	if (bo == NULL) {
+		for (unsigned i = 0; i < S8_GPU_MAX_BOS; i++) {
+			if (fBos[i] != NULL && fBos[i]->va == (uint64_t)type) {
+				bo = fBos[i];
+				break;
+			}
+		}
+	}
+	if (bo == NULL) {
+		return NULL;
+	}
+	bo->mem->retain();
+	return bo->mem;
+}
+
 /* IOResources matching runs more than once during boot; the self test runs
  * on the first instance only. */
 static bool s8_gpu_ran;
@@ -741,6 +1204,12 @@ S8Mali::start(IOService *provider)
 	fBlock = NULL;
 	fBlockVa = NULL;
 	fBlockPhys = 0;
+	fTables = NULL;
+	fTablesPhys = 0;
+	fL3Count = 0;
+	fBoCount = 0;
+	fLock = NULL;
+	fPowered = false;
 
 	fMali = (volatile uint8_t *)ml_io_map(S8_MALI_BASE, S8_MALI_SIZE);
 	fPmu = (volatile uint8_t *)ml_io_map(S8_PMU_G3D_CONF, 0x10);
@@ -773,6 +1242,7 @@ S8Mali::start(IOService *provider)
 	if (ok) {
 		IOLog("S8 GPU: milestone 2a passed: a WRITE_VALUE job ran from XNU\n");
 	}
+	setProperty(kIOUserClientClassKey, "S8MaliUserClient");
 	bool bo_ok = false;
 	if (ok && tablesInit() && asUpdate(fTablesPhys | LPAE_TRANSTAB)) {
 		bo_ok = boTest();
