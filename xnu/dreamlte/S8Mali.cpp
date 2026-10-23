@@ -1161,7 +1161,12 @@ S8Mali::userSubmit(uint64_t jc, uint32_t requirements)
 			}
 		}
 		uint32_t status = *(volatile uint32_t *)cpu;
+		static uint32_t s8_submit_ok;
 		if (done && status == 1) {
+			if ((s8_submit_ok++ % 256) == 0) {
+				IOLog("S8 GPU: submit ok %u, job 0x%llx slot %u\n",
+				    s8_submit_ok, jc, slot);
+			}
 			ret = kIOReturnSuccess;
 		} else {
 			IOLog("S8 GPU: submit status 0x%x RAWSTAT 0x%x fault 0x%x at 0x%x "

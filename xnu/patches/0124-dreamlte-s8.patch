@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..a40e59c
+index 0000000..c24706c
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,1389 @@
+@@ -0,0 +1,1394 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -2009,7 +2009,12 @@ index 0000000..a40e59c
 +			}
 +		}
 +		uint32_t status = *(volatile uint32_t *)cpu;
++		static uint32_t s8_submit_ok;
 +		if (done && status == 1) {
++			if ((s8_submit_ok++ % 256) == 0) {
++				IOLog("S8 GPU: submit ok %u, job 0x%llx slot %u\n",
++				    s8_submit_ok, jc, slot);
++			}
 +			ret = kIOReturnSuccess;
 +		} else {
 +			IOLog("S8 GPU: submit status 0x%x RAWSTAT 0x%x fault 0x%x at 0x%x "
