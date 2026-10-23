@@ -99,6 +99,8 @@ jobs:
             -Dtools= \
             -Dbuild-tests=false \
             -Dvalgrind=disabled \
+            -Dzstd=disabled \
+            -Dlz4=disabled \
             -Dshader-cache=disabled \
             --default-library=shared 2>&1 | tail -40
 
