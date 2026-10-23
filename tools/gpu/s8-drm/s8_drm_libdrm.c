@@ -15,12 +15,13 @@
 #include "s8_drm.h"
 
 #define DRM_COMMAND_BASE_	0x40
+/* _IOC_SIZE is not in Darwin's sys/ioctl.h, but the encoding is the same. */
+#define S8_IOC_SIZE(r)		(((r) >> 16) & 0x3fff)
 
 int
 drmIoctl(int fd, unsigned long request, void *arg)
 {
 	unsigned nr = (unsigned)(request & 0xff);
-	unsigned size = (unsigned)_IOC_SIZE(request);
 
 	if (nr < DRM_COMMAND_BASE_) {
 		errno = EINVAL;
@@ -32,7 +33,7 @@ drmIoctl(int fd, unsigned long request, void *arg)
 int
 drmCommandWriteRead(int fd, unsigned long index, void *data, unsigned long size)
 {
-	unsigned long request = (3u << 30) | (size << 16) | ('d' << 8) |
+	unsigned long request = (3u << 30) | ((size & 0x3fff) << 16) | ('d' << 8) |
 	    (DRM_COMMAND_BASE_ + (index & 0xff));
 
 	return drmIoctl(fd, request, data);
