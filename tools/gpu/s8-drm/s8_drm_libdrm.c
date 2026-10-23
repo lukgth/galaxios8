@@ -148,6 +148,33 @@ drmSyncobjTransfer(int fd, uint32_t dst_handle, uint64_t dst_point,
 }
 
 int
+drmSyncobjFDToHandle(int fd, int obj_fd, uint32_t *handle)
+{
+	(void)fd;
+	(void)obj_fd;
+	(void)handle;
+	errno = ENOSYS;
+	return -1;
+}
+
+int
+drmSyncobjReset(int fd, const uint32_t *handles, uint32_t handle_count)
+{
+	(void)fd;
+	(void)handles;
+	(void)handle_count;
+	return 0;
+}
+
+int
+drmCloseBufferHandle(int fd, uint32_t handle)
+{
+	(void)fd;
+	(void)handle;
+	return 0;
+}
+
+int
 drmSyncobjImportSyncFile(int fd, uint32_t handle, int sync_file_fd)
 {
 	(void)fd;
