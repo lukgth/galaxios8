@@ -27,8 +27,8 @@ The phone's Android props can lie (for example a ROM ported from another model).
 | Area | State |
 | --- | --- |
 | Boot | Stock Samsung S-Boot → our loader in the BOOT partition → XNU. Recovery (TWRP), EFS and the bootloaders are not touched |
-| CPU | 4 Cortex-A53 cores (MPIDR 0x100–0x103), started through the PMU + PSCI. 4 KiB pages, GIC-400, 26 MHz timer |
-| Memory | 512 MiB of the upper bank at `0x880000000` |
+| CPU | 8 cores: 4 Cortex-A53 (MPIDR 0x100–0x103) and 4 Mongoose M2 (MPIDR 0x000–0x003), started through PSCI. 4 KiB hardware pages, GIC-400, 26 MHz timer. A53 1690 MHz, Mongoose 1703 MHz through ACPM |
+| Memory | 2 GiB: the upper bank at `0x880000000`. The low banks need multi-range support in pmap |
 | Storage | Own Exynos UFS driver. The iOS root is HFS+ in USERDATA (`sda24`), read/write |
 | iOS userland | iPhone X 16.7.16 root filesystem and shared cache; launchd, daemons, backboardd, SpringBoard |
 | Display | S-Boot framebuffer, 1440×2960 (DECON in command mode). CoreAnimation renders on the CPU; each frame is copied into panel memory right after a DECON frame-done (boot 31 code, tearing fix not yet confirmed on the phone) |
@@ -44,21 +44,22 @@ The phone's Android props can lie (for example a ROM ported from another model).
 - **Very slow and laggy.** All rendering is on the CPU, there is no GPU. About 15 minutes to the lock screen on one core.
 - Frames tear (top of one screen, bottom of the next) because DECON scans the panel memory while AppleCLCD copies into it. Patched in the latest commit, not yet verified on the phone.
 - The centered iPhone X 1125×2436 presentation is faster; the full-screen 1440×2960 mode (`sweetfb_native=1`) is the default.
-- The Mongoose (big) cluster does not start yet: cluster 0 and core 0x000 report powered, `CPU_ON` returns 0, but the core never reaches the entry (boot 31).
 - No Wi-Fi, Bluetooth, cellular, audio, cameras, sensors, GPS or SEP / Face ID.
-- **No GPU.** The Mali-G71 cannot run iOS's Metal / AGX drivers, so hardware graphics is not realistic.
+- **No GPU yet.** The Mali-G71 cannot run Apple's Metal driver. A kernel driver (`iokit/Kernel/arm/S8Mali.cpp`) is in progress; Mesa Panfrost and CoreAnimation's OpenGL ES backend are the next step. See `docs/DREAMLTE_GPU.md`.
 - Security is off: permissive AMFI/sandbox, stub AppleKeyStore. Do not put anything personal on it.
 
 ## Roadmap
 
 - [x] S6SY761 touch driver in XNU
 - [x] Fix the 4-core stalls (physical timer)
-- [ ] Bring up the Mongoose cluster (4 more cores), raise the A53 clock (now ~1050 of 1690 MHz)
+- [x] Mongoose cluster (4 more cores) and ACPM clocks (A53 1690, Mongoose 1703 MHz)
+- [ ] Heterogeneous scheduling, idle states and thermal policy
 - [ ] Tear-free display: verify the frame-done copy; zero-copy scanout through the DPU input DMA (probe only, moving the IDMA base had no visible effect in boot 28)
 - [x] 1125×2436 presentation (canvas fix in `cf8366b`; the faster mode, but full-screen stays the default)
 - [x] RTC (date/time)
 - [x] Battery (MAX77865 fuel gauge)
-- [ ] More RAM (512 MiB of 4 GiB today)
+- [x] 2 GiB RAM
+- [ ] More than 2 GiB (multi-range pmap)
 - [ ] Vibration motor, backlight brightness
 - [ ] Wi-Fi (BCM4361): a large job
 
