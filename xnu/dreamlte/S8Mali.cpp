@@ -1339,13 +1339,13 @@ s8_probe_one(const char *path)
 		return;
 	}
 	VATTR_INIT(&va);
-	VATTR_WANTED(&va, va_size);
+	VATTR_WANTED(&va, va_data_size);
 	if (vnode_getattr(vp, &va, ctx) == 0) {
-		IOLog("S8 PROBE: %s: %lld bytes\n", path, (long long)va.va_size);
+		IOLog("S8 PROBE: %s: %lld bytes\n", path, (long long)va.va_data_size);
 	}
 	memset(buf, 0, sizeof(buf));
 	err = vn_rdwr(UIO_READ, vp, buf, sizeof(buf) - 1, 0, UIO_SYSSPACE, 0,
-	    NOCRED, NULL, ctx);
+	    NOCRED, NULL, current_proc());
 	if (err == 0) {
 		for (int i = 0; i < (int)sizeof(buf) - 1 && buf[i] != 0; i++) {
 			if (buf[i] == '\n') {
