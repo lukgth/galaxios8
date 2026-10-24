@@ -49,6 +49,14 @@ jobs:
           # 12.5-14.3 use the top-level patches dir; ours go next to blacktop's
           cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
           # libfirehose_kernel is built arm64e-only; the SWEET kernel is plain arm64
+          # Put ccache in front of the compiler the build scripts run.
+          mkdir -p ccache-bin
+          for t in clang clang++ cc c++; do
+            printf '#!/bin/sh\nexec %s/opt/ccache/libexec/%s "$@"\n' "$(brew --prefix)" "$t" > "ccache-bin/$t"
+            chmod +x "ccache-bin/$t"
+          done
+          echo "$PWD/ccache-bin" >> "$GITHUB_PATH"
+
           if [ "$MACHINE_CONFIG" = A5XELTE ]; then
             # Cortex-A53 (Exynos7580 / Exynos8895) is ARMv8.0: Xcode's default
             # arm64 code generation emits LSE atomics (ldadd/cas) that trap as
@@ -64,7 +72,7 @@ jobs:
 
       - name: Deps
         run: |
-          brew install jq gum bash cmake ninja
+          brew install jq gum bash cmake ninja ccache
           # build.sh only checks that xcodes exists (Xcode is preinstalled); no bottle on macOS 14
           printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/xcodes >/dev/null
           sudo chmod +x /usr/local/bin/xcodes
@@ -76,8 +84,23 @@ jobs:
           xcodebuild -version
           xcrun --find iig
 
+      - uses: actions/cache@v4
+        with:
+          # The compiler cache only: a restored build tree hides the patched
+          # source, but ccache is keyed by the preprocessed input and cannot
+          # go stale.
+          path: ~/.ccache
+          key: xnu-ccache-${{ github.sha }}
+          restore-keys: |
+            xnu-ccache-
+
       - name: Build
         working-directory: dxb
+        env:
+          CCACHE_DIR: ~/.ccache
+          CCACHE_MAXSIZE: 8G
+          CCACHE_COMPRESS: '1'
+          CCACHE_SLOPPINESS: time_macros,file_stat_matches
         # A restored build tree makes build.sh say "already built" and the
         # kernel is not in the cached tree, so drop the product first: the
         # objects stay, only the link and the packaging run again.
@@ -85,6 +108,10 @@ jobs:
           # keep going after errors so one run reports every compile failure
           MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
         run: bash build.sh
+
+      - name: Compiler cache stats
+        if: always()
+        run: ccache -s || true
 
       - name: Package build tree for local compiles
         if: always()
