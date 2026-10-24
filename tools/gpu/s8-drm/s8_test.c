@@ -208,7 +208,7 @@ main(void)
 
 	memset(&sub, 0, sizeof(sub));
 	sub.jc = a.offset;
-	sub.requirements = 1;				/* PANFROST_JD_REQ_FS */
+	sub.requirements = 0;	/* a WRITE_VALUE chain is not a fragment job */
 	if (call(PF_SUBMIT, &sub, sizeof(sub)) != 0) {
 		say("s8_test: SUBMIT failed\n");
 		return 1;
