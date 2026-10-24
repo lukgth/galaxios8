@@ -16,17 +16,6 @@ on:
       drivers:
         description: gallium drivers
         default: softpipe
-  push:
-    paths:
-      - ".github/workflows/mesa.yml"
-      - "tools/gpu/mesa/**"
-
-concurrency:
-  group: mesa-${{ github.ref }}
-  cancel-in-progress: false
-
-env:
-  MESA_VERSION: "25.0.7"
 
 jobs:
   build:
