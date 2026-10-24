@@ -76,6 +76,15 @@ jobs:
           xcodebuild -version
           xcrun --find iig
 
+      - uses: actions/cache@v4
+        with:
+          # The object files of the last build: an incremental build after a
+          # small patch takes minutes instead of twenty.
+          path: dxb/build
+          key: xnu-build-${{ hashFiles('xnu/patches/**') }}
+          restore-keys: |
+            xnu-build-
+
       - name: Build
         working-directory: dxb
         env:

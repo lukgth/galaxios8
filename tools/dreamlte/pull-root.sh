@@ -29,8 +29,10 @@ for ((i = 0; i < n; i++)); do
 		want=$(adb -s "$serial" shell \
 			"dd if=$dev bs=1048576 skip=$skip count=$chunk 2>/dev/null | sha256sum" |
 			cut -d' ' -f1)
-		adb -s "$serial" shell \
-			"dd if=$dev bs=1048576 skip=$skip count=$chunk 2>/dev/null" > "$tmp/c.bin"
+		# gzip on the phone: the volume holds mostly zeros and text
+		adb -s "$serial" exec-out \
+			"dd if=$dev bs=1048576 skip=$skip count=$chunk 2>/dev/null | gzip -1" |
+			gunzip > "$tmp/c.bin"
 		got=$(sha256sum "$tmp/c.bin" | cut -d' ' -f1)
 		if [ "$got" = "$want" ]; then
 			break

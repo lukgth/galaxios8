@@ -19,6 +19,8 @@ import os
 import subprocess
 import sys
 
+SUB = 1 << 20		# granularity of a single write
+
 DEV = '/dev/block/sda24'
 CHUNK = 32 << 20
 MIB = 32
@@ -70,21 +72,30 @@ def main():
             live = adb_shell(f'dd if={DEV} bs=1048576 skip={skip} count={MIB} 2>/dev/null')
             if len(live) != CHUNK:
                 raise SystemExit(f'chunk {i}: read back {len(live)} bytes')
-            if chunk_sha(live) != chunk_sha(b) and not force:
-                print(f'chunk {i}: the phone differs from BASE here, skipped')
-                drifted += 1
-                continue
-            path = f'/tmp/c{i}.bin'
-            with open('/tmp/s8-chunk.bin', 'wb') as f:
-                f.write(n)
-            adb('push', '/tmp/s8-chunk.bin', path)
-            adb_shell(f'dd if={path} of={DEV} bs=1048576 seek={skip} count={MIB} '
-                      f'conv=notrunc 2>/dev/null; sync; rm -f {path}')
-            back = adb_shell(f'dd if={DEV} bs=1048576 skip={skip} count={MIB} 2>/dev/null')
-            if chunk_sha(back) != chunk_sha(n):
-                raise SystemExit(f'chunk {i}: write did not verify')
-            written += 1
-            print(f'chunk {i}: written')
+            # One megabyte at a time: a changed file usually touches one
+            # block, and a drifted block is left to the running system.
+            for so in range(0, CHUNK, SUB):
+                sb = b[so:so + SUB]
+                sn = n[so:so + SUB]
+                if sb == sn:
+                    continue
+                sl = live[so:so + SUB]
+                if chunk_sha(sl) != chunk_sha(sb) and not force:
+                    print(f'chunk {i} +{so >> 20} MiB: the phone differs, skipped')
+                    drifted += 1
+                    continue
+                mib = skip + (so >> 20)
+                path = f'/tmp/s{mib}.bin'
+                with open('/tmp/s8-sub.bin', 'wb') as f:
+                    f.write(sn)
+                adb('push', '/tmp/s8-sub.bin', path)
+                adb_shell(f'dd if={path} of={DEV} bs=1048576 seek={mib} count=1 '
+                          f'conv=notrunc 2>/dev/null; sync; rm -f {path}')
+                back = adb_shell(f'dd if={DEV} bs=1048576 skip={mib} count=1 2>/dev/null')
+                if chunk_sha(back) != chunk_sha(sn):
+                    raise SystemExit(f'chunk {i} +{so >> 20} MiB: write did not verify')
+                written += 1
+                print(f'chunk {i} +{so >> 20} MiB: written')
     print(f'unchanged {same}, written {written}, drifted {drifted}')
 
 
