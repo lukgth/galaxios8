@@ -126,6 +126,30 @@ plistlib.dump(d, open('/System/Library/xpc/launchd.plist', 'wb'),
 This was found the hard way: a replaced `com.apple.analyticsd.plist` did not
 change what ran, because launchd used the copy in the table.
 
+Three more rules came out of the first runs on the phone:
+
+1. `/bin/sh` does not exist on iOS 16. Point the job at the binary itself.
+2. A binary must be code signed, even ad hoc (`codesign -f -s -`). Without a
+   signature `vm_map_with_linking` refuses region 0 and the process dies with
+   signal 9 and `not code signed` in the ring. `amfi_get_out_of_my_way=1`
+   does not lift that check here.
+3. `write()` to `/dev/console` lands in the kernel log ring. It is the only
+   channel from user space that works without the GPU user client, so every
+   test line goes there as well.
+
+The user client works from user space. Log `logs/sweetlog-diag1.txt`:
+
+```
+s8_test: user client open
+S8 USER: s8_test: user client open
+S8 USER: s8_test: GPU_PROD_ID 0x6000
+S8 USER: s8_test: A handle 1 VA 0x16000, B handle 2 VA 0x17000
+S8 USER: s8_test: A at 0x1007f4000, B at 0x1007f8000
+```
+
+A chain of WRITE_VALUE jobs does not run on the fragment slot. The same chain
+on slot 1 finishes with the value in place.
+
 ## Rules
 
 - Do not report success with llvmpipe, softpipe or any CPU renderer.
