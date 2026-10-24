@@ -87,10 +87,16 @@ jobs:
 
       - name: Build
         working-directory: dxb
+        # A restored build tree makes build.sh say "already built" and the
+        # kernel is not in the cached tree, so drop the product first: the
+        # objects stay, only the link and the packaging run again.
         env:
           # keep going after errors so one run reports every compile failure
           MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
-        run: bash build.sh
+        run: |
+          rm -f fakeroot/System/Library/Kernels/kernel.*
+          find . -name 'kernel.development.a5xelte' -delete
+          bash build.sh
 
       - name: Package build tree for local compiles
         if: always()
