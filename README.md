@@ -42,10 +42,18 @@ The phone's Android props can lie (for example a ROM ported from another model).
 ## Known bugs
 
 - **Very slow and laggy.** All rendering is on the CPU, there is no GPU. About 15 minutes to the lock screen on one core.
+- **The panel shows only the first frames of a boot.** backboardd presents three to five frames, then the
+  system sits idle: measured on 2026-10-24 on the original root image, the original kernel, and every test
+  image, so it is older than the GPU work. The framebuffer contents were not yet read back to say whether
+  the panel is dark because there is no scan-out or because the backlight is off.
 - Frames tear (top of one screen, bottom of the next) because DECON scans the panel memory while AppleCLCD copies into it. Patched in the latest commit, not yet verified on the phone.
 - The centered iPhone X 1125×2436 presentation is faster; the full-screen 1440×2960 mode (`sweetfb_native=1`) is the default.
 - No Wi-Fi, Bluetooth, cellular, audio, cameras, sensors, GPS or SEP / Face ID.
-- **No GPU yet.** The Mali-G71 cannot run Apple's Metal driver. A kernel driver (`iokit/Kernel/arm/S8Mali.cpp`) is in progress; Mesa Panfrost and CoreAnimation's OpenGL ES backend are the next step. See `docs/DREAMLTE_GPU.md`.
+- **The GPU driver runs jobs but no client frame yet.** `iokit/Kernel/arm/S8Mali.cpp` has the panfrost user
+  client, and `tools/gpu/s8-drm` talks to it from user space: the client opens, `GET_PARAM` answers, buffer
+  objects are made and mapped, and the submit path knows the job slots. A job submitted from a process still
+  does not complete (the same job from the kernel does), and Mesa with the panfrost driver is built for
+  iOS but has not drawn a frame. See `docs/DREAMLTE_GPU.md`.
 - Security is off: permissive AMFI/sandbox, stub AppleKeyStore. Do not put anything personal on it.
 
 ## Roadmap
