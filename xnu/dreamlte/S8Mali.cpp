@@ -97,6 +97,7 @@ extern "C" void flush_dcache(vm_offset_t addr, unsigned count, int phys);
 #define JS_AFFINITY_NEXT_HI	0x54
 #define JS_CONFIG_NEXT		0x58
 #define JS_COMMAND_NEXT		0x60
+#define JS_COMMAND		0x20
 
 /* MMU: address space 0 at 0x2400 */
 #define MMU_INT_RAWSTAT		0x2000

@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..aa3fdd5
+index 0000000..cf18a30
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,1566 @@
+@@ -0,0 +1,1567 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -945,6 +945,7 @@ index 0000000..aa3fdd5
 +#define JS_AFFINITY_NEXT_HI	0x54
 +#define JS_CONFIG_NEXT		0x58
 +#define JS_COMMAND_NEXT		0x60
++#define JS_COMMAND		0x20
 +
 +/* MMU: address space 0 at 0x2400 */
 +#define MMU_INT_RAWSTAT		0x2000
