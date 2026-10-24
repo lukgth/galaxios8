@@ -30,6 +30,10 @@
 #include <libkern/libkern.h>
 #include <pexpert/pexpert.h>
 #include <pexpert/arm64/board_config.h>
+#include <kern/thread.h>
+#include <sys/uio.h>
+#include <sys/vnode.h>
+#include <sys/vnode_if.h>
 
 #if defined(ARM64_BOARD_CONFIG_A5XELTE) && defined(DREAMLTE)
 
@@ -1317,6 +1321,70 @@ S8Mali::uapiTest(void)
 
 /* IOResources matching runs more than once during boot; the self test runs
  * on the first instance only. */
+
+/* A file probe for bring-up: it proves what the running system sees on the
+ * root volume, which is the only way to check a flashed image from the ring. */
+static void
+s8_probe_one(const char *path)
+{
+	struct vnode *vp = NULL;
+	struct vnode_attr va;
+	vfs_context_t ctx = vfs_context_current();
+	char buf[64];
+	int err;
+
+	err = vnode_lookup(path, 0, &vp, ctx);
+	if (err != 0 || vp == NULL) {
+		IOLog("S8 PROBE: %s: no vnode (%d)\n", path, err);
+		return;
+	}
+	VATTR_INIT(&va);
+	VATTR_WANTED(&va, va_size);
+	if (vnode_getattr(vp, &va, ctx) == 0) {
+		IOLog("S8 PROBE: %s: %lld bytes\n", path, (long long)va.va_size);
+	}
+	memset(buf, 0, sizeof(buf));
+	err = vn_rdwr(UIO_READ, vp, buf, sizeof(buf) - 1, 0, UIO_SYSSPACE, 0,
+	    NOCRED, NULL, ctx);
+	if (err == 0) {
+		for (int i = 0; i < (int)sizeof(buf) - 1 && buf[i] != 0; i++) {
+			if (buf[i] == '\n') {
+				buf[i] = ' ';
+			}
+		}
+		IOLog("S8 PROBE: %s: [%s]\n", path, buf);
+	} else {
+		IOLog("S8 PROBE: %s: read error %d\n", path, err);
+	}
+	vnode_put(vp);
+}
+
+static void
+s8_probe_thread(void *arg, wait_result_t wr)
+{
+	(void)arg;
+	(void)wr;
+	IOSleep(30000);
+	IOLog("S8 PROBE: 30 s after the GPU started\n");
+	s8_probe_one("/s8-root.txt");
+	s8_probe_one("/usr/bin/s8_test");
+	s8_probe_one("/usr/bin/s8_gltest");
+	s8_probe_one("/usr/lib/libOSMesa.8.dylib");
+	s8_probe_one("/System/Library/LaunchDaemons/com.apple.addaily.plist");
+	s8_probe_one("/Library/LaunchDaemons/com.s8.gputest.plist");
+	thread_terminate(current_thread());
+}
+
+static void
+s8_start_probe(void)
+{
+	thread_t thread = NULL;
+	if (kernel_thread_start((thread_continue_t)s8_probe_thread, NULL, &thread) ==
+	    KERN_SUCCESS) {
+		thread_deallocate(thread);
+	}
+}
+
 static bool s8_gpu_ran;
 
 bool
@@ -1333,6 +1401,12 @@ S8Mali::start(IOService *provider)
 		return true;
 	}
 	s8_gpu_ran = true;
+	{
+		uint32_t probe = 0;
+		if (PE_parse_boot_argn("s8probe", &probe, sizeof(probe)) && probe != 0) {
+			s8_start_probe();
+		}
+	}
 	fMali = NULL;
 	fPmu = NULL;
 	fBlock = NULL;
