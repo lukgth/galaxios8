@@ -43,7 +43,9 @@ jobs:
             -framework IOKit -framework CoreFoundation \
             -o out/s8_test tools/gpu/s8-drm/s8_test.c
           file out/s8_test
-          codesign -s - -f out/s8_test || true
+          codesign -f -s - --timestamp=none out/s8_test
+          codesign -dvvv out/s8_test 2>&1 | head -5
+          xcrun otool -l out/s8_test | grep -A1 LC_CODE_SIGNATURE | head -3
           otool -L out/s8_test
 
       - name: Build libs8drm.a
