@@ -39,7 +39,22 @@
  
 --- a/src/gallium/targets/osmesa/meson.build
 +++ b/src/gallium/targets/osmesa/meson.build
-@@ -38,7 +38,8 @@
+@@ -22,11 +22,12 @@
+   command : gen_vs_module_defs_normal_command,
+ )
+ 
+-libosmesa = shared_library(
++libosmesa = library(
+   osmesa_lib_name,
+   'osmesa_target.c',
+   gnu_symbol_visibility : 'hidden',
+-  link_args : [ld_args_gc_sections, osmesa_link_args],
++  link_args : [ld_args_gc_sections, osmesa_link_args,
++                '-framework', 'IOKit', '-framework', 'CoreFoundation'],
+   vs_module_defs : osmesa_def,
+   include_directories : [
+     inc_include, inc_src, inc_gallium, inc_gallium_aux, inc_gallium_winsys,
+@@ -38,7 +39,8 @@
      libmesa, libgallium, libws_null, osmesa_link_with,
    ],
    dependencies : [
