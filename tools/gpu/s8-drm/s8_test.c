@@ -9,6 +9,7 @@
  * has no console while iOS runs.
  */
 #include <stdarg.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -73,23 +74,32 @@ static io_connect_t conn;
 static void
 say(const char *fmt, ...)
 {
+	static int cons = -1;
+	char line[240];
 	va_list ap;
 
 	va_start(ap, fmt);
-	vfprintf(stdout, fmt, ap);
+	vsnprintf(line, sizeof(line), fmt, ap);
 	va_end(ap);
+
+	printf("%s", line);
+	fflush(stdout);
 	if (out != NULL) {
-		va_start(ap, fmt);
-		vfprintf(out, fmt, ap);
-		va_end(ap);
+		fprintf(out, "%s", line);
 		fflush(out);
 	}
-	fflush(stdout);
+	/* /dev/console is the fallback: its writes reach the kernel log ring
+	 * even when the user client cannot be opened. */
+	if (cons == -1) {
+		cons = open("/dev/console", O_WRONLY);
+		if (cons < 0) {
+			cons = -2;
+		}
+	}
+	if (cons >= 0) {
+		write(cons, line, strlen(line));
+	}
 	if (conn != 0) {
-		char line[240];
-		va_start(ap, fmt);
-		vsnprintf(line, sizeof(line), fmt, ap);
-		va_end(ap);
 		IOConnectCallStructMethod(conn, PF_LOG, line, strlen(line), NULL, NULL);
 	}
 }

@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <stdarg.h>
 
 #include <IOKit/IOKitLib.h>
@@ -33,6 +35,19 @@ ring(const char *fmt, ...)
 	va_end(ap);
 	printf("%s\n", line);
 	fflush(stdout);
+	{
+		static int cons = -1;
+		if (cons == -1) {
+			cons = open("/dev/console", O_WRONLY);
+			if (cons < 0) {
+				cons = -2;
+			}
+		}
+		if (cons >= 0) {
+			write(cons, line, strlen(line));
+			write(cons, "\n", 1);
+		}
+	}
 	if (gpu != 0) {
 		IOConnectCallStructMethod(gpu, 0x80, line, strlen(line), NULL, NULL);
 	}
