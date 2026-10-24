@@ -11,6 +11,11 @@
 
 #include <stdint.h>
 
+/* The DRM ioctl encodings and the mode structures come from the kernel
+ * headers, as they do with libdrm. */
+#include <drm.h>
+#include <drm_mode.h>
+
 typedef struct _drmVersion {
 	int version_major;
 	int version_minor;
