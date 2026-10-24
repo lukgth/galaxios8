@@ -35,9 +35,19 @@ jobs:
 
       - name: Fetch Mesa
         run: |
-          curl -fsSL -o mesa.tar.xz \
-            "https://archive.mesa3d.org/mesa-${MESA_VERSION}.tar.xz"
-          tar xf mesa.tar.xz
+          for url in \
+            "https://archive.mesa3d.org/mesa-${MESA_VERSION}.tar.xz" \
+            "https://dl.freedesktop.org/mesa/archive/mesa-${MESA_VERSION}.tar.xz" \
+            "https://github.com/mesa3d/mesa/archive/refs/tags/mesa-${MESA_VERSION}.tar.gz"; do
+            echo "trying $url"
+            if curl -fsSL --retry 3 -o mesa.tar.xz "$url"; then
+              break
+            fi
+          done
+          case $(file -b mesa.tar.xz) in
+            *gzip*) tar xzf mesa.tar.xz ;;
+            *) tar xf mesa.tar.xz ;;
+          esac
           ln -sf "mesa-${MESA_VERSION}" mesa
           ls mesa | head
 
