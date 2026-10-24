@@ -1040,13 +1040,38 @@ S8Mali::gpuAcquire(void)
 		IOLog("S8 GPU: acquire: the address space was not updated\n");
 		return false;
 	}
+	unsigned mapped = 0;
 	for (unsigned i = 0; i < S8_GPU_MAX_BOS; i++) {
-		if (fBos[i] != NULL && !mapBo(fBos[i])) {
-			IOLog("S8 GPU: acquire: buffer %u was not mapped\n", i);
-			return false;
+		if (fBos[i] != NULL) {
+			if (!mapBo(fBos[i])) {
+				IOLog("S8 GPU: acquire: buffer %u was not mapped\n", i);
+				return false;
+			}
+			mapped++;
 		}
 	}
 	fPowered = true;
+	/* Prove that the GPU runs a job after the power cycle, before any
+	 * client submits one. The block is mapped and writable. */
+	{
+		uint32_t *hdr = (uint32_t *)fBlockVa;
+		for (unsigned i = 0; i < 16; i++) {
+			hdr[i] = 0;
+		}
+		uint64_t target = fBlockPhys + 0x80;
+		hdr[4] = 1u | 2u << 1 | 1u << 16;
+		hdr[8] = (uint32_t)target;
+		hdr[9] = (uint32_t)(target >> 32);
+		hdr[10] = 6;
+		hdr[12] = 0x600dbeefu;
+		flush_dcache((vm_offset_t)fBlockVa, S8_GPU_BLOCK_SIZE, 0);
+		uint32_t raw = 0;
+		bool ran = runJob(fBlockPhys, hdr, &raw, 0);
+		flush_dcache((vm_offset_t)fBlockVa, S8_GPU_BLOCK_SIZE, 0);
+		IOLog("S8 GPU: acquire: %u buffers, check job %s RAWSTAT 0x%x "
+		    "status 0x%x value 0x%x\n", mapped, ran ? "done" : "TIMEOUT",
+		    raw, hdr[0], *(volatile uint32_t *)((uint8_t *)fBlockVa + 0x80));
+	}
 	{
 		static unsigned acq;
 		if (acq++ < 4) {
