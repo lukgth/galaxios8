@@ -1024,12 +1024,19 @@ S8Mali::gpuAcquire(void)
 		IOLog("S8 GPU: acquire: the domain did not power up\n");
 		return false;
 	}
+	/* The blocks must be powered before a soft reset: a reset while the
+	 * MMU is off leaves the address space disabled (jobs then run on
+	 * physical addresses). */
+	if (!gpuPowerUp()) {
+		IOLog("S8 GPU: acquire: the blocks did not power up\n");
+		return false;
+	}
 	if (!gpuReset()) {
 		IOLog("S8 GPU: acquire: the reset did not finish\n");
 		return false;
 	}
 	if (!gpuPowerUp()) {
-		IOLog("S8 GPU: acquire: the blocks did not power up\n");
+		IOLog("S8 GPU: acquire: the blocks did not power up after reset\n");
 		return false;
 	}
 	if (fTables == NULL && !tablesInit()) {

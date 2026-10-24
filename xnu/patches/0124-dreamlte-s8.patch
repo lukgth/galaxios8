@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..3b0f3f6
+index 0000000..9fc30c3
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,1592 @@
+@@ -0,0 +1,1599 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -1872,12 +1872,19 @@ index 0000000..3b0f3f6
 +		IOLog("S8 GPU: acquire: the domain did not power up\n");
 +		return false;
 +	}
++	/* The blocks must be powered before a soft reset: a reset while the
++	 * MMU is off leaves the address space disabled (jobs then run on
++	 * physical addresses). */
++	if (!gpuPowerUp()) {
++		IOLog("S8 GPU: acquire: the blocks did not power up\n");
++		return false;
++	}
 +	if (!gpuReset()) {
 +		IOLog("S8 GPU: acquire: the reset did not finish\n");
 +		return false;
 +	}
 +	if (!gpuPowerUp()) {
-+		IOLog("S8 GPU: acquire: the blocks did not power up\n");
++		IOLog("S8 GPU: acquire: the blocks did not power up after reset\n");
 +		return false;
 +	}
 +	if (fTables == NULL && !tablesInit()) {
