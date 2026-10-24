@@ -17,6 +17,9 @@ on:
         description: gallium drivers
         default: softpipe
 
+env:
+  MESA_VERSION: 25.0.7
+
 jobs:
   build:
     runs-on: macos-14
