@@ -113,12 +113,12 @@ jobs:
           [properties]
           needs_exe_wrapper = true
           [built-in options]
-          c_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-Wno-error']
+          c_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-Wno-error', '-I$PWD/tools/gpu/s8-drm']
           cpp_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-Wno-error']
           objc_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-Wno-error']
           objcpp_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-Wno-error']
-          c_link_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK']
-          cpp_link_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK']
+          c_link_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-L$PWD/shim', '-ls8drm']
+          cpp_link_args = ['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-L$PWD/shim', '-ls8drm']
           EOF
           cat ios.ini
 
