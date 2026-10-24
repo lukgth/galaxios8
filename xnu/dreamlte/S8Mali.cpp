@@ -1547,9 +1547,11 @@ S8Mali::start(IOService *provider)
 		return true;
 	}
 	s8_gpu_ran = true;
+	/* The command line is long and PE has a fixed table, so late arguments
+	 * can be dropped: run the probe whenever the self test runs. */
 	{
 		uint32_t probe = 0;
-		if (PE_parse_boot_argn("s8fbprobe", &probe, sizeof(probe)) && probe != 0) {
+		if (PE_parse_boot_argn("s8gpu", &probe, sizeof(probe)) && probe >= 3) {
 			s8_start_probe();
 		}
 	}
