@@ -49,28 +49,15 @@
    ],
    name_prefix : host_machine.system() == 'windows' ? '' : [],  # otherwise mingw will create libosmesa.dll
    soversion : host_machine.system() == 'windows' ? '' : '8',
---- a/meson.build
-+++ b/meson.build
-@@ -1714,7 +1714,21 @@
- else
-   # We should prevent libdrm from being available when the target doesn't have it to avoid transitive
-   # dependencies (such as vk-runtime) linking to it
--  dep_libdrm = null_dep
-+  if host_machine.system() == 'darwin'
-+    # iOS: the S8Mali user client provides the libdrm names as a dylib, and
-+    # pointing dep_libdrm at it also turns on the renderonly helpers.
-+    dep_libdrm = declare_dependency(
-+      link_args : [
-+        '-L' + join_paths(meson.project_source_root(), '..', 'shim'),
-+        '-ls8drm',
-+      ],
-+      compile_args : [
-+        '-I' + join_paths(meson.project_source_root(), '..', 'tools', 'gpu', 's8-drm'),
-+      ],
-+    )
-+  else
-+    dep_libdrm = null_dep
-+  endif
- endif
- if dep_libdrm.found()
-   pre_args += '-DHAVE_LIBDRM'
+--- a/src/gallium/auxiliary/meson.build
++++ b/src/gallium/auxiliary/meson.build
+@@ -288,7 +288,8 @@
+   'nir/nir_draw_helpers.h',
+ )
+ 
+-if dep_libdrm.found()
++if dep_libdrm.found() or host_machine.system() == 'darwin'
++  # panfrost needs the renderonly helpers; on iOS they come without libdrm.
+   files_libgallium += files(
+     'renderonly/renderonly.c',
+     'renderonly/renderonly.h',
