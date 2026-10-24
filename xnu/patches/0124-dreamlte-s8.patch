@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..a6b9424
+index 0000000..9052d39
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,1519 @@
+@@ -0,0 +1,1522 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -2329,6 +2329,9 @@ index 0000000..a6b9424
 +		IOLog("S8 GPU: milestone 2a passed: a WRITE_VALUE job ran from XNU\n");
 +	}
 +	setProperty(kIOUserClientClassKey, "S8MaliUserClient");
++	/* Publish the node so user space can match "S8Mali" and open the
++	 * user client: without this the driver is invisible to IOKit. */
++	registerService();
 +	bool bo_ok = false;
 +	if (ok && tablesInit() && asUpdate(fTablesPhys | LPAE_TRANSTAB)) {
 +		bo_ok = boTest();

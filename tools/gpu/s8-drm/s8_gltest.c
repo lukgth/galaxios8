@@ -81,6 +81,7 @@ main(void)
 	const char *ver, *rend;
 	unsigned sum = 0;
 
+	ring("s8_gltest: start");
 	{
 		io_service_t service = IOServiceGetMatchingService(kIOMainPortDefault,
 		    IOServiceMatching("S8Mali"));

@@ -1481,6 +1481,9 @@ S8Mali::start(IOService *provider)
 		IOLog("S8 GPU: milestone 2a passed: a WRITE_VALUE job ran from XNU\n");
 	}
 	setProperty(kIOUserClientClassKey, "S8MaliUserClient");
+	/* Publish the node so user space can match "S8Mali" and open the
+	 * user client: without this the driver is invisible to IOKit. */
+	registerService();
 	bool bo_ok = false;
 	if (ok && tablesInit() && asUpdate(fTablesPhys | LPAE_TRANSTAB)) {
 		bo_ok = boTest();
