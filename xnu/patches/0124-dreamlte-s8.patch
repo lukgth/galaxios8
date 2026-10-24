@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..12c93fb
+index 0000000..50aa200
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,1491 @@
+@@ -0,0 +1,1508 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -879,6 +879,7 @@ index 0000000..12c93fb
 +#include <pexpert/pexpert.h>
 +#include <pexpert/arm64/board_config.h>
 +#include <kern/thread.h>
++#include <sys/proc.h>
 +#include <sys/uio.h>
 +#include <sys/vnode.h>
 +#include <sys/vnode_if.h>
@@ -2177,13 +2178,25 @@ index 0000000..12c93fb
 +{
 +	struct vnode *vp = NULL;
 +	struct vnode_attr va;
-+	vfs_context_t ctx = vfs_context_current();
++	vfs_context_t ctx = NULL;
++	proc_t p = proc_find(1);
 +	char buf[64];
 +	int err;
 +
++	/* A kernel thread has no root directory: borrow launchd's. */
++	if (p != NULL) {
++		ctx = vfs_context_create_with_proc(p);
++	}
++	if (ctx == NULL) {
++		ctx = vfs_context_create(NULL);
++	}
 +	err = vnode_lookup(path, 0, &vp, ctx);
 +	if (err != 0 || vp == NULL) {
 +		IOLog("S8 PROBE: %s: no vnode (%d)\n", path, err);
++		vfs_context_rele(ctx);
++		if (p != NULL) {
++			proc_rele(p);
++		}
 +		return;
 +	}
 +	VATTR_INIT(&va);
@@ -2205,6 +2218,10 @@ index 0000000..12c93fb
 +		IOLog("S8 PROBE: %s: read error %d\n", path, err);
 +	}
 +	vnode_put(vp);
++	vfs_context_rele(ctx);
++	if (p != NULL) {
++		proc_rele(p);
++	}
 +}
 +
 +static void

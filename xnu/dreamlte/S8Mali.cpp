@@ -31,6 +31,7 @@
 #include <pexpert/pexpert.h>
 #include <pexpert/arm64/board_config.h>
 #include <kern/thread.h>
+#include <sys/proc.h>
 #include <sys/uio.h>
 #include <sys/vnode.h>
 #include <sys/vnode_if.h>
@@ -1329,13 +1330,25 @@ s8_probe_one(const char *path)
 {
 	struct vnode *vp = NULL;
 	struct vnode_attr va;
-	vfs_context_t ctx = vfs_context_current();
+	vfs_context_t ctx = NULL;
+	proc_t p = proc_find(1);
 	char buf[64];
 	int err;
 
+	/* A kernel thread has no root directory: borrow launchd's. */
+	if (p != NULL) {
+		ctx = vfs_context_create_with_proc(p);
+	}
+	if (ctx == NULL) {
+		ctx = vfs_context_create(NULL);
+	}
 	err = vnode_lookup(path, 0, &vp, ctx);
 	if (err != 0 || vp == NULL) {
 		IOLog("S8 PROBE: %s: no vnode (%d)\n", path, err);
+		vfs_context_rele(ctx);
+		if (p != NULL) {
+			proc_rele(p);
+		}
 		return;
 	}
 	VATTR_INIT(&va);
@@ -1357,6 +1370,10 @@ s8_probe_one(const char *path)
 		IOLog("S8 PROBE: %s: read error %d\n", path, err);
 	}
 	vnode_put(vp);
+	vfs_context_rele(ctx);
+	if (p != NULL) {
+		proc_rele(p);
+	}
 }
 
 static void
