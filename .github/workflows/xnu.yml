@@ -76,15 +76,6 @@ jobs:
           xcodebuild -version
           xcrun --find iig
 
-      - uses: actions/cache@v4
-        with:
-          # The object files of the last build: an incremental build after a
-          # small patch takes minutes instead of twenty.
-          path: dxb/build
-          key: xnu-build-${{ hashFiles('xnu/patches/**') }}
-          restore-keys: |
-            xnu-build-
-
       - name: Build
         working-directory: dxb
         # A restored build tree makes build.sh say "already built" and the
@@ -93,10 +84,7 @@ jobs:
         env:
           # keep going after errors so one run reports every compile failure
           MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
-        run: |
-          rm -f fakeroot/System/Library/Kernels/kernel.*
-          find . -name 'kernel.development.a5xelte' -delete
-          bash build.sh
+        run: bash build.sh
 
       - name: Package build tree for local compiles
         if: always()
