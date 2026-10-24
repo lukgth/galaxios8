@@ -32,8 +32,7 @@
 #include <pexpert/arm64/board_config.h>
 #include <machine/machine_routines.h>
 
-/* The arm64 build picks a machine_routines.h that lacks this one. */
-extern "C" void ml_io_unmap(vm_offset_t addr, vm_size_t sz);
+
 #include <kern/thread.h>
 #include <sys/proc.h>
 #include <sys/uio.h>
@@ -1469,35 +1468,44 @@ s8_probe_one(const char *path)
 }
 
 /* Sample the panel memory, so the ring says whether the screen holds a
- * picture or is still black. The framebuffer lives at 0xcc000000 with a
- * 5760-byte stride for 1440x2960 BGRA. */
+ * picture or is still black. The framebuffer is 1440x2960 BGRA with a
+ * 5760-byte stride at 0xcc000000; reading it through an IOKit mapping is
+ * safe, ml_io_map is for device registers only. */
 static void
 s8_fb_sample(const char *when)
 {
 	const uint64_t base = 0xcc000000;
-	const uint32_t stride = 5760, height = 2960;
+	const uint32_t len = 5760u * 2960u;
+	IOMemoryDescriptor *md = IOMemoryDescriptor::withPhysicalAddress(base, len,
+	    kIODirectionNone);
+	if (md == NULL) {
+		IOLog("S8 FB: %s: no descriptor\n", when);
+		return;
+	}
+	IOMemoryMap *map = md->map();
+	md->release();
+	if (map == NULL) {
+		IOLog("S8 FB: %s: no mapping\n", when);
+		return;
+	}
+	volatile uint8_t *fb = (volatile uint8_t *)map->getVirtualAddress();
 	unsigned nonblack = 0, samples = 0;
 	uint32_t sum = 0;
 
-	for (uint64_t off = 0; off + 0x1000 <= (uint64_t)stride * height;
-	    off += 0x100000) {
-		vm_offset_t va = ml_io_map(base + off, 0x1000);
-		if (va == 0) {
-			continue;
-		}
-		volatile uint8_t *page = (volatile uint8_t *)va;
-		for (unsigned i = 0; i + 3 < 0x1000; i += 64) {
-			uint32_t v = page[i] | page[i + 1] | page[i + 2];
+	for (uint32_t y = 0; y < 2960; y += 37) {
+		for (uint32_t x = 0; x < 5760; x += 4 * 53) {
+			uint32_t off = y * 5760 + x;
+			uint32_t v = fb[off] | fb[off + 1] | fb[off + 2];
 			sum = sum * 31u + v;
 			if (v != 0) {
 				nonblack++;
 			}
 			samples++;
 		}
-		ml_io_unmap(va, 0x1000);	/* declared in machine_routines.h */
 	}
 	IOLog("S8 FB: %s: %u/%u samples non-black, sum 0x%x\n", when, nonblack,
 	    samples, sum);
+	map->release();
 }
 
 static void
