@@ -101,6 +101,31 @@ The driver is a user client now. Mesa can talk to it. What is missing is a
 5. Mesa 25.0.7 with `panfrost` and OSMesa, and a Darwin `pan_kmod` backend.
 6. CoreAnimation through its OpenGL ES backend. CoreAnimation renders in software today.
 
+## Running our own code on iOS 16
+
+A plist in `/Library/LaunchDaemons` or `/System/Library/LaunchDaemons` does
+nothing on this system. iOS 16 launchd reads the job table from one file,
+`/System/Library/xpc/launchd.plist`, a binary plist whose `LaunchDaemons` key
+maps a plist path to the job dictionary. The boot argument
+`launchd_unsecure_cache=1` lets launchd use that table without a seal.
+
+So a test job is added to that table, not to the directory:
+
+```python
+d = plistlib.load(open('/System/Library/xpc/launchd.plist', 'rb'))
+d['LaunchDaemons']['/System/Library/LaunchDaemons/com.s8.gputest.plist'] = {
+    'Label': 'com.s8.gputest',
+    'ProgramArguments': ['/bin/sh', '-c', 'sleep 10; /usr/bin/s8_test'],
+    'RunAtLoad': True,
+    'ProcessType': 'Background',
+}
+plistlib.dump(d, open('/System/Library/xpc/launchd.plist', 'wb'),
+    fmt=plistlib.FMT_BINARY)
+```
+
+This was found the hard way: a replaced `com.apple.analyticsd.plist` did not
+change what ran, because launchd used the copy in the table.
+
 ## Rules
 
 - Do not report success with llvmpipe, softpipe or any CPU renderer.
