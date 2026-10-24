@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..5e39a81
+index 0000000..aa3fdd5
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,1553 @@
+@@ -0,0 +1,1566 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -1271,7 +1271,9 @@ index 0000000..5e39a81
 +	/* Slot 0 runs fragment jobs, slot 1 vertex/tiler and compute. panfrost
 +	 * picks the slot from the requirements of the submit. */
 +	uint32_t js = JS0 + slot * 0x80;
-+	uint32_t donebit = (1u << slot) | 0x10000u;	/* done or MMU fault */
++	/* The slot signals completion through its own bit; the high half of
++	 * RAWSTAT carries one interrupt bit per slot on this part. */
++	uint32_t evbit = (1u << slot) | (0x10000u << slot);
 +	flush_dcache((vm_offset_t)fBlockVa, S8_GPU_BLOCK_SIZE, 0);
 +	wr(JOB_INT_CLEAR, 0xffffffffu);
 +	wr(js + JS_HEAD_NEXT_LO, (uint32_t)jc);
@@ -1283,14 +1285,18 @@ index 0000000..5e39a81
 +	bool done = false;
 +	for (unsigned i = 0; i < 200000; i++) {		/* 200 ms */
 +		uint32_t raw = rd(JOB_INT_RAWSTAT);
-+		if (raw & donebit) {
-+			done = (raw & (1u << slot)) != 0;
++		if (raw & evbit) {
 +			break;
 +		}
 +		IODelay(1);
 +	}
 +	*rawstat = rd(JOB_INT_RAWSTAT);
++	done = (rawstat[0] & (1u << slot)) != 0;
 +	flush_dcache((vm_offset_t)headerWord, 0x40, 0);
++	/* The header word is the truth: the GPU writes 1 when the chain ends. */
++	if (!done && headerWord != NULL) {
++		done = headerWord[0] == 1;
++	}
 +	return done;
 +}
 +
@@ -1888,6 +1894,13 @@ index 0000000..5e39a81
 +		}
 +	}
 +	fPowered = true;
++	{
++		static unsigned acq;
++		if (acq++ < 4) {
++			IOLog("S8 GPU: acquire: the GPU runs (%u buffers mapped)\n",
++			    fBoCount);
++		}
++	}
 +	return true;
 +}
 +
@@ -2071,14 +2084,14 @@ index 0000000..5e39a81
 +				    h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7],
 +				    h[8], h[9], h[10], h[11], h[12]);
 +			}
-+			IOLog("S8 GPU: submit slots: JS0 status 0x%x head 0x%x/0x%x, "
-+			    "JS1 status 0x%x head 0x%x/0x%x, JS2 status 0x%x "
-+			    "present 0x%x\n",
-+			    rd(JS0 + JS_STATUS), rd(JS0 + JS_HEAD_NEXT_LO),
-+			    rd(JS0 + JS_HEAD_NEXT_HI),
-+			    rd(JS0 + 0x40 + JS_STATUS), rd(JS0 + 0x40 + JS_HEAD_NEXT_LO),
-+			    rd(JS0 + 0x40 + JS_HEAD_NEXT_HI),
-+			    rd(JS0 + 0x80 + JS_STATUS), rd(JS_PRESENT));
++			unsigned s0 = slot * 0x80;
++			IOLog("S8 GPU: submit slot %u: status 0x%x head 0x%x/0x%x "
++			    "cmd 0x%x present 0x%x rawstat 0x%x mask 0x%x "
++			    "gpu int 0x%x\n", slot,
++			    rd(JS0 + s0 + JS_STATUS), rd(JS0 + s0 + JS_HEAD_NEXT_LO),
++			    rd(JS0 + s0 + JS_HEAD_NEXT_HI), rd(JS0 + s0 + JS_COMMAND),
++			    rd(JS_PRESENT), rd(JOB_INT_RAWSTAT), rd(JOB_INT_MASK),
++			    rd(GPU_INT_RAWSTAT));
 +			/* A fault leaves the slot and the MMU stopped: start again so
 +			 * the next submit has a working GPU. Buffers stay mapped. */
 +			if (gpuReset() && gpuPowerUp()) {

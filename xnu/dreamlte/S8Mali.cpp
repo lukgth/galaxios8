@@ -423,7 +423,9 @@ S8Mali::runJob(uint64_t jc, uint32_t *headerWord, uint32_t *rawstat, unsigned sl
 	/* Slot 0 runs fragment jobs, slot 1 vertex/tiler and compute. panfrost
 	 * picks the slot from the requirements of the submit. */
 	uint32_t js = JS0 + slot * 0x80;
-	uint32_t donebit = (1u << slot) | 0x10000u;	/* done or MMU fault */
+	/* The slot signals completion through its own bit; the high half of
+	 * RAWSTAT carries one interrupt bit per slot on this part. */
+	uint32_t evbit = (1u << slot) | (0x10000u << slot);
 	flush_dcache((vm_offset_t)fBlockVa, S8_GPU_BLOCK_SIZE, 0);
 	wr(JOB_INT_CLEAR, 0xffffffffu);
 	wr(js + JS_HEAD_NEXT_LO, (uint32_t)jc);
@@ -435,14 +437,18 @@ S8Mali::runJob(uint64_t jc, uint32_t *headerWord, uint32_t *rawstat, unsigned sl
 	bool done = false;
 	for (unsigned i = 0; i < 200000; i++) {		/* 200 ms */
 		uint32_t raw = rd(JOB_INT_RAWSTAT);
-		if (raw & donebit) {
-			done = (raw & (1u << slot)) != 0;
+		if (raw & evbit) {
 			break;
 		}
 		IODelay(1);
 	}
 	*rawstat = rd(JOB_INT_RAWSTAT);
+	done = (rawstat[0] & (1u << slot)) != 0;
 	flush_dcache((vm_offset_t)headerWord, 0x40, 0);
+	/* The header word is the truth: the GPU writes 1 when the chain ends. */
+	if (!done && headerWord != NULL) {
+		done = headerWord[0] == 1;
+	}
 	return done;
 }
 
@@ -1040,6 +1046,13 @@ S8Mali::gpuAcquire(void)
 		}
 	}
 	fPowered = true;
+	{
+		static unsigned acq;
+		if (acq++ < 4) {
+			IOLog("S8 GPU: acquire: the GPU runs (%u buffers mapped)\n",
+			    fBoCount);
+		}
+	}
 	return true;
 }
 
@@ -1223,14 +1236,14 @@ S8Mali::userSubmit(uint64_t jc, uint32_t requirements)
 				    h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7],
 				    h[8], h[9], h[10], h[11], h[12]);
 			}
-			IOLog("S8 GPU: submit slots: JS0 status 0x%x head 0x%x/0x%x, "
-			    "JS1 status 0x%x head 0x%x/0x%x, JS2 status 0x%x "
-			    "present 0x%x\n",
-			    rd(JS0 + JS_STATUS), rd(JS0 + JS_HEAD_NEXT_LO),
-			    rd(JS0 + JS_HEAD_NEXT_HI),
-			    rd(JS0 + 0x40 + JS_STATUS), rd(JS0 + 0x40 + JS_HEAD_NEXT_LO),
-			    rd(JS0 + 0x40 + JS_HEAD_NEXT_HI),
-			    rd(JS0 + 0x80 + JS_STATUS), rd(JS_PRESENT));
+			unsigned s0 = slot * 0x80;
+			IOLog("S8 GPU: submit slot %u: status 0x%x head 0x%x/0x%x "
+			    "cmd 0x%x present 0x%x rawstat 0x%x mask 0x%x "
+			    "gpu int 0x%x\n", slot,
+			    rd(JS0 + s0 + JS_STATUS), rd(JS0 + s0 + JS_HEAD_NEXT_LO),
+			    rd(JS0 + s0 + JS_HEAD_NEXT_HI), rd(JS0 + s0 + JS_COMMAND),
+			    rd(JS_PRESENT), rd(JOB_INT_RAWSTAT), rd(JOB_INT_MASK),
+			    rd(GPU_INT_RAWSTAT));
 			/* A fault leaves the slot and the MMU stopped: start again so
 			 * the next submit has a working GPU. Buffers stay mapped. */
 			if (gpuReset() && gpuPowerUp()) {
