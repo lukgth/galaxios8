@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..c5625e4
+index 0000000..0bc6161
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,1637 @@
+@@ -0,0 +1,1640 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -879,6 +879,9 @@ index 0000000..c5625e4
 +#include <pexpert/pexpert.h>
 +#include <pexpert/arm64/board_config.h>
 +#include <machine/machine_routines.h>
++
++/* The arm64 build picks a machine_routines.h that lacks this one. */
++extern "C" void ml_io_unmap(vm_offset_t addr, vm_size_t sz);
 +#include <kern/thread.h>
 +#include <sys/proc.h>
 +#include <sys/uio.h>

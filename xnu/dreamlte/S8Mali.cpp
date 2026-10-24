@@ -31,6 +31,9 @@
 #include <pexpert/pexpert.h>
 #include <pexpert/arm64/board_config.h>
 #include <machine/machine_routines.h>
+
+/* The arm64 build picks a machine_routines.h that lacks this one. */
+extern "C" void ml_io_unmap(vm_offset_t addr, vm_size_t sz);
 #include <kern/thread.h>
 #include <sys/proc.h>
 #include <sys/uio.h>
