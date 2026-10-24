@@ -30,6 +30,7 @@
 #include <libkern/libkern.h>
 #include <pexpert/pexpert.h>
 #include <pexpert/arm64/board_config.h>
+#include <machine/machine_routines.h>
 #include <kern/thread.h>
 #include <sys/proc.h>
 #include <sys/uio.h>
@@ -1490,7 +1491,7 @@ s8_fb_sample(const char *when)
 			}
 			samples++;
 		}
-		ml_io_unmap(va, 0x1000);
+		ml_io_unmap(va, 0x1000);	/* declared in machine_routines.h */
 	}
 	IOLog("S8 FB: %s: %u/%u samples non-black, sum 0x%x\n", when, nonblack,
 	    samples, sum);
