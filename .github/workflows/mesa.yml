@@ -70,7 +70,11 @@ jobs:
               -isysroot "$SDK" -Itools/gpu/s8-drm \
               -c "tools/gpu/s8-drm/$f.c" -o "shim/$f.o"
           done
-          xcrun --sdk iphoneos ar rcs shim/libs8drm.a shim/s8_drm.o shim/s8_drm_libdrm.o
+          xcrun --sdk iphoneos clang -target arm64-apple-ios16.0 -dynamiclib \
+            -install_name /usr/lib/libs8drm.dylib -isysroot "$SDK" \
+            -framework IOKit -framework CoreFoundation \
+            -o shim/libs8drm.dylib shim/s8_drm.o shim/s8_drm_libdrm.o
+          codesign -s - -f shim/libs8drm.dylib || true
           # Some Mesa targets include <xf86drm.h> without taking dep_libdrm,
           # so put our header where inc_include already points.
           cp tools/gpu/s8-drm/xf86drm.h tools/gpu/s8-drm/s8_drm.h mesa/include/
@@ -152,6 +156,7 @@ jobs:
           mkdir -p out
           find mesa/build -name 'libOSMesa*.dylib' -o -name 'libgallium*.dylib' \
             -o -name 'libglapi*.dylib' | while read -r f; do cp "$f" out/; done
+          cp shim/libs8drm.dylib out/
           ls -la out
           for f in out/*.dylib; do [ -e "$f" ] || continue; file "$f"; done
 
