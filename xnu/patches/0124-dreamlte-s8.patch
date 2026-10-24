@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..50aa200
+index 0000000..a6b9424
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,1508 @@
+@@ -0,0 +1,1519 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -2190,7 +2190,18 @@ index 0000000..50aa200
 +	if (ctx == NULL) {
 +		ctx = vfs_context_create(NULL);
 +	}
-+	err = vnode_lookup(path, 0, &vp, ctx);
++	/* A kernel thread has no root directory, and a borrowed process may
++	 * have none either: look the path up from the root vnode itself. */
++	{
++		struct vnode *root = vfs_rootvnode();
++		const char *rel = path[0] == '/' ? path + 1 : path;
++		if (root != NULL) {
++			err = vnode_lookupat(rel, 0, &vp, ctx, root);
++			vnode_put(root);
++		} else {
++			err = vnode_lookup(path, 0, &vp, ctx);
++		}
++	}
 +	if (err != 0 || vp == NULL) {
 +		IOLog("S8 PROBE: %s: no vnode (%d)\n", path, err);
 +		vfs_context_rele(ctx);

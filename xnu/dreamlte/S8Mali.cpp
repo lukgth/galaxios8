@@ -1342,7 +1342,18 @@ s8_probe_one(const char *path)
 	if (ctx == NULL) {
 		ctx = vfs_context_create(NULL);
 	}
-	err = vnode_lookup(path, 0, &vp, ctx);
+	/* A kernel thread has no root directory, and a borrowed process may
+	 * have none either: look the path up from the root vnode itself. */
+	{
+		struct vnode *root = vfs_rootvnode();
+		const char *rel = path[0] == '/' ? path + 1 : path;
+		if (root != NULL) {
+			err = vnode_lookupat(rel, 0, &vp, ctx, root);
+			vnode_put(root);
+		} else {
+			err = vnode_lookup(path, 0, &vp, ctx);
+		}
+	}
 	if (err != 0 || vp == NULL) {
 		IOLog("S8 PROBE: %s: no vnode (%d)\n", path, err);
 		vfs_context_rele(ctx);
