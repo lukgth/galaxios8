@@ -1216,6 +1216,21 @@ S8Mali::userSubmit(uint64_t jc, uint32_t requirements)
 			IOLog("S8 GPU: submit status 0x%x RAWSTAT 0x%x fault 0x%x at 0x%x "
 			    "(job 0x%llx)\n", status, raw, rd(AS0 + AS_FAULTSTATUS),
 			    rd(AS0 + AS_FAULTADDRESS_LO), jc);
+			{
+				uint32_t *h = (uint32_t *)cpu;
+				IOLog("S8 GPU: submit header %08x %08x %08x %08x %08x %08x "
+				    "%08x %08x %08x %08x %08x %08x %08x\n",
+				    h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7],
+				    h[8], h[9], h[10], h[11], h[12]);
+			}
+			IOLog("S8 GPU: submit slots: JS0 status 0x%x head 0x%x/0x%x, "
+			    "JS1 status 0x%x head 0x%x/0x%x, JS2 status 0x%x "
+			    "present 0x%x\n",
+			    rd(JS0 + JS_STATUS), rd(JS0 + JS_HEAD_NEXT_LO),
+			    rd(JS0 + JS_HEAD_NEXT_HI),
+			    rd(JS0 + 0x40 + JS_STATUS), rd(JS0 + 0x40 + JS_HEAD_NEXT_LO),
+			    rd(JS0 + 0x40 + JS_HEAD_NEXT_HI),
+			    rd(JS0 + 0x80 + JS_STATUS), rd(JS_PRESENT));
 			/* A fault leaves the slot and the MMU stopped: start again so
 			 * the next submit has a working GPU. Buffers stay mapped. */
 			if (gpuReset() && gpuPowerUp()) {
