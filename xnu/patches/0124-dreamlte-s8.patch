@@ -842,10 +842,10 @@ index 7a32a23..4e20b25 100644
  	*usecs = nsecs / NSEC_PER_USEC;
 diff --git a/iokit/Kernel/arm/S8Mali.cpp b/iokit/Kernel/arm/S8Mali.cpp
 new file mode 100644
-index 0000000..9052d39
+index 0000000..528db3a
 --- /dev/null
 +++ b/iokit/Kernel/arm/S8Mali.cpp
-@@ -0,0 +1,1522 @@
+@@ -0,0 +1,1538 @@
 +/*
 + * Galaxy S8 Mali-G71 (Bifrost, r0p0 MP20) driver, milestone 2a: the same
 + * "one job" test the loader runs (shim/dreamlte/pmic.c, runs c29/c30b), now
@@ -1739,12 +1739,11 @@ index 0000000..9052d39
 +			break;
 +		}
 +		s8_pf_submit s;
-+		if (out != NULL && outSize >= sizeof(s)) {
-+			bcopy(&s, out, sizeof(s));	/* the shim may pass it in either */
-+		} else {
-+			bcopy(in, &s, sizeof(s));
-+		}
++		bcopy(in, &s, sizeof(s));
 +		ret = fGpu->userSubmit(s.jc, s.requirements);
++		if (ret == kIOReturnSuccess && out != NULL && outSize >= sizeof(s)) {
++			bcopy(&s, out, sizeof(s));
++		}
 +		break;
 +	}
 +	case 0x01: {					/* WAIT_BO */
@@ -1862,17 +1861,29 @@ index 0000000..9052d39
 +	if (fPowered) {
 +		return true;
 +	}
-+	if (!powerUpDomain() || !gpuReset() || !gpuPowerUp()) {
++	if (!powerUpDomain()) {
++		IOLog("S8 GPU: acquire: the domain did not power up\n");
++		return false;
++	}
++	if (!gpuReset()) {
++		IOLog("S8 GPU: acquire: the reset did not finish\n");
++		return false;
++	}
++	if (!gpuPowerUp()) {
++		IOLog("S8 GPU: acquire: the blocks did not power up\n");
 +		return false;
 +	}
 +	if (fTables == NULL && !tablesInit()) {
++		IOLog("S8 GPU: acquire: no page tables\n");
 +		return false;
 +	}
 +	if (!asUpdate(fTablesPhys | LPAE_TRANSTAB)) {
++		IOLog("S8 GPU: acquire: the address space was not updated\n");
 +		return false;
 +	}
 +	for (unsigned i = 0; i < S8_GPU_MAX_BOS; i++) {
 +		if (fBos[i] != NULL && !mapBo(fBos[i])) {
++			IOLog("S8 GPU: acquire: buffer %u was not mapped\n", i);
 +			return false;
 +		}
 +	}
@@ -2020,6 +2031,11 @@ index 0000000..9052d39
 +	IOReturn ret = kIOReturnBadArgument;
 +	uint64_t size = 0;
 +	uint64_t cpu = vaToCpu(jc, &size);
++	if (cpu == 0) {
++		IOLog("S8 GPU: submit: job 0x%llx is not inside a buffer\n", jc);
++	} else if (!gpuAcquire()) {
++		IOLog("S8 GPU: submit: the GPU did not start for job 0x%llx\n", jc);
++	}
 +	if (cpu != 0 && gpuAcquire()) {
 +		for (unsigned i = 0; i < S8_GPU_MAX_BOS; i++) {
 +			if (fBos[i] != NULL) {

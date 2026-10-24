@@ -891,12 +891,11 @@ S8MaliUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *a
 			break;
 		}
 		s8_pf_submit s;
-		if (out != NULL && outSize >= sizeof(s)) {
-			bcopy(&s, out, sizeof(s));	/* the shim may pass it in either */
-		} else {
-			bcopy(in, &s, sizeof(s));
-		}
+		bcopy(in, &s, sizeof(s));
 		ret = fGpu->userSubmit(s.jc, s.requirements);
+		if (ret == kIOReturnSuccess && out != NULL && outSize >= sizeof(s)) {
+			bcopy(&s, out, sizeof(s));
+		}
 		break;
 	}
 	case 0x01: {					/* WAIT_BO */
@@ -1014,17 +1013,29 @@ S8Mali::gpuAcquire(void)
 	if (fPowered) {
 		return true;
 	}
-	if (!powerUpDomain() || !gpuReset() || !gpuPowerUp()) {
+	if (!powerUpDomain()) {
+		IOLog("S8 GPU: acquire: the domain did not power up\n");
+		return false;
+	}
+	if (!gpuReset()) {
+		IOLog("S8 GPU: acquire: the reset did not finish\n");
+		return false;
+	}
+	if (!gpuPowerUp()) {
+		IOLog("S8 GPU: acquire: the blocks did not power up\n");
 		return false;
 	}
 	if (fTables == NULL && !tablesInit()) {
+		IOLog("S8 GPU: acquire: no page tables\n");
 		return false;
 	}
 	if (!asUpdate(fTablesPhys | LPAE_TRANSTAB)) {
+		IOLog("S8 GPU: acquire: the address space was not updated\n");
 		return false;
 	}
 	for (unsigned i = 0; i < S8_GPU_MAX_BOS; i++) {
 		if (fBos[i] != NULL && !mapBo(fBos[i])) {
+			IOLog("S8 GPU: acquire: buffer %u was not mapped\n", i);
 			return false;
 		}
 	}
@@ -1172,6 +1183,11 @@ S8Mali::userSubmit(uint64_t jc, uint32_t requirements)
 	IOReturn ret = kIOReturnBadArgument;
 	uint64_t size = 0;
 	uint64_t cpu = vaToCpu(jc, &size);
+	if (cpu == 0) {
+		IOLog("S8 GPU: submit: job 0x%llx is not inside a buffer\n", jc);
+	} else if (!gpuAcquire()) {
+		IOLog("S8 GPU: submit: the GPU did not start for job 0x%llx\n", jc);
+	}
 	if (cpu != 0 && gpuAcquire()) {
 		for (unsigned i = 0; i < S8_GPU_MAX_BOS; i++) {
 			if (fBos[i] != NULL) {
