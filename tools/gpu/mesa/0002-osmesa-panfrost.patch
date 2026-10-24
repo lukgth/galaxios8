@@ -1,0 +1,51 @@
+--- a/src/gallium/targets/osmesa/osmesa_target.c
++++ b/src/gallium/targets/osmesa/osmesa_target.c
+@@ -26,7 +26,15 @@
+ 
+ #include "sw/null/null_sw_winsys.h"
+ 
++#if defined(__APPLE__)
++#include <unistd.h>
++
++#include <s8_drm.h>
+ 
++#include "panfrost/drm/panfrost_drm_public.h"
++#endif
++
++
+ struct pipe_screen *
+ osmesa_create_screen(void);
+ 
+@@ -34,6 +42,20 @@
+ struct pipe_screen *
+ osmesa_create_screen(void)
+ {
++#if defined(__APPLE__)
++   /* On iOS the GPU is the Mali behind the S8Mali user client. Try it
++    * first and fall back to the software rasteriser if it is not there. */
++   {
++      int fd = s8_drm_open();
++      if (fd >= 0) {
++         struct pipe_screen *mali =
++            panfrost_drm_screen_create(fd, NULL);
++         if (mali != NULL)
++            return debug_screen_wrap(mali);
++         close(fd);
++      }
++   }
++#endif
+    struct sw_winsys *winsys;
+    struct pipe_screen *screen;
+ 
+--- a/src/gallium/targets/osmesa/meson.build
++++ b/src/gallium/targets/osmesa/meson.build
+@@ -38,7 +38,8 @@
+     libmesa, libgallium, libws_null, osmesa_link_with,
+   ],
+   dependencies : [
+-    dep_ws2_32, dep_thread, dep_clock, dep_unwind, driver_swrast, idep_mesautil,
++    dep_ws2_32, dep_thread, dep_clock, dep_unwind, driver_swrast,
++    driver_panfrost, idep_mesautil,
+   ],
+   name_prefix : host_machine.system() == 'windows' ? '' : [],  # otherwise mingw will create libosmesa.dll
+   soversion : host_machine.system() == 'windows' ? '' : '8',
