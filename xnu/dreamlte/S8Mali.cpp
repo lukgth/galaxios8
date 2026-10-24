@@ -1464,6 +1464,38 @@ s8_probe_one(const char *path)
 	}
 }
 
+/* Sample the panel memory, so the ring says whether the screen holds a
+ * picture or is still black. The framebuffer lives at 0xcc000000 with a
+ * 5760-byte stride for 1440x2960 BGRA. */
+static void
+s8_fb_sample(const char *when)
+{
+	const uint64_t base = 0xcc000000;
+	const uint32_t stride = 5760, height = 2960;
+	unsigned nonblack = 0, samples = 0;
+	uint32_t sum = 0;
+
+	for (uint64_t off = 0; off + 0x1000 <= (uint64_t)stride * height;
+	    off += 0x100000) {
+		vm_offset_t va = ml_io_map(base + off, 0x1000);
+		if (va == 0) {
+			continue;
+		}
+		volatile uint8_t *page = (volatile uint8_t *)va;
+		for (unsigned i = 0; i + 3 < 0x1000; i += 64) {
+			uint32_t v = page[i] | page[i + 1] | page[i + 2];
+			sum = sum * 31u + v;
+			if (v != 0) {
+				nonblack++;
+			}
+			samples++;
+		}
+		ml_io_unmap(va, 0x1000);
+	}
+	IOLog("S8 FB: %s: %u/%u samples non-black, sum 0x%x\n", when, nonblack,
+	    samples, sum);
+}
+
 static void
 s8_probe_thread(void *arg, wait_result_t wr)
 {
@@ -1471,6 +1503,11 @@ s8_probe_thread(void *arg, wait_result_t wr)
 	(void)wr;
 	IOSleep(30000);
 	IOLog("S8 PROBE: 30 s after the GPU started\n");
+	s8_fb_sample("30 s");
+	IOSleep(30000);
+	s8_fb_sample("60 s");
+	IOSleep(60000);
+	s8_fb_sample("120 s");
 	s8_probe_one("/s8-root.txt");
 	s8_probe_one("/usr/bin/s8_test");
 	s8_probe_one("/usr/bin/s8_gltest");
@@ -1508,7 +1545,7 @@ S8Mali::start(IOService *provider)
 	s8_gpu_ran = true;
 	{
 		uint32_t probe = 0;
-		if (PE_parse_boot_argn("s8probe", &probe, sizeof(probe)) && probe != 0) {
+		if (PE_parse_boot_argn("s8fbprobe", &probe, sizeof(probe)) && probe != 0) {
 			s8_start_probe();
 		}
 	}
