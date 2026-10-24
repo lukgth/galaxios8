@@ -69,7 +69,7 @@ jobs:
           mkdir -p shim
           for f in s8_drm s8_drm_libdrm; do
             xcrun --sdk iphoneos clang -target arm64-apple-ios16.0 -O2 -Wall \
-              -isysroot "$SDK" -Itools/gpu/s8-drm \
+              -isysroot "$SDK" -Itools/gpu/s8-drm -Imesa/include/drm-uapi \
               -c "tools/gpu/s8-drm/$f.c" -o "shim/$f.o"
           done
           xcrun --sdk iphoneos clang -target arm64-apple-ios16.0 -dynamiclib \
